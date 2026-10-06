@@ -13,7 +13,7 @@ importers:
         version: 1.1.0
     devDependencies:
       '@clack/prompts':
-        specifier: ^1.8.1
+        specifier: 1.8.1
         version: 1.8.1
       '@eslint-community/eslint-plugin-eslint-comments':
         specifier: 4.8.1
@@ -31,7 +31,7 @@ importers:
         specifier: 26.6.2
         version: 26.6.2
       '@valibot/to-json-schema':
-        specifier: ^1.8.0
+        specifier: 1.8.0
         version: 1.8.0(valibot@1.5.0(typescript@5.9.3))
       '@vitest/coverage-v8':
         specifier: 5.0.1
@@ -40,7 +40,7 @@ importers:
         specifier: 1.6.27
         version: 1.6.27(@typescript-eslint/eslint-plugin@8.71.0(@typescript-eslint/parser@8.71.0(eslint@10.12.0(jiti@2.7.0))(typescript@5.9.3))(eslint@10.12.0(jiti@2.7.0))(typescript@5.9.3))(eslint@10.12.0(jiti@2.7.0))(typescript@5.9.3)(vitest@5.0.1)
       arktype:
-        specifier: ^2.2.7
+        specifier: 2.2.7
         version: 2.2.7
       console-fail-test:
         specifier: 0.9.0
@@ -115,13 +115,13 @@ importers:
         specifier: 8.71.0
         version: 8.71.0(eslint@10.12.0(jiti@2.7.0))(typescript@5.9.3)
       valibot:
-        specifier: ^1.5.0
+        specifier: 1.5.0
         version: 1.5.0(typescript@5.9.3)
       vitest:
         specifier: 5.0.1
         version: 5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(vite@8.3.2(@types/node@26.6.2)(jiti@2.7.0)(yaml@2.9.1))
       zod:
-        specifier: ^4.6.5
+        specifier: 4.6.5
         version: 4.6.5
 
 packages:

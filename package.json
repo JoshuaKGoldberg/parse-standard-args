@@ -45,16 +45,16 @@
 		"@standard-schema/spec": "^1.1.0"
 	},
 	"devDependencies": {
-		"@clack/prompts": "^1.8.1",
+		"@clack/prompts": "1.8.1",
 		"@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
 		"@eslint/js": "10.0.1",
 		"@eslint/markdown": "8.0.3",
 		"@release-it/conventional-changelog": "12.0.0",
 		"@types/node": "26.6.2",
-		"@valibot/to-json-schema": "^1.8.0",
+		"@valibot/to-json-schema": "1.8.0",
 		"@vitest/coverage-v8": "5.0.1",
 		"@vitest/eslint-plugin": "1.6.27",
-		"arktype": "^2.2.7",
+		"arktype": "2.2.7",
 		"console-fail-test": "0.9.0",
 		"cspell": "10.3.3",
 		"eslint": "10.12.0",
@@ -79,9 +79,9 @@
 		"tsdown": "0.23.0",
 		"typescript": "5.9.3",
 		"typescript-eslint": "8.71.0",
-		"valibot": "^1.5.0",
+		"valibot": "1.5.0",
 		"vitest": "5.0.1",
-		"zod": "^4.6.5"
+		"zod": "4.6.5"
 	},
 	"peerDependencies": {
 		"@clack/prompts": ">=0.11"
