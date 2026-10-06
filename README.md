@@ -142,23 +142,23 @@ const cli = createCli({
 
 ### `createCli` Settings
 
-| Setting            | Type                                    | Description                                                                                                               |
-| ------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `description`      | `string`                                | Sentence(s) describing what the CLI does, for help text.                                                                  |
-| `examples`         | `string[]`                              | Example commands, printed as-is in help text.                                                                             |
-| `footer`           | `string`                                | Text printed at the end of help text, such as a link to docs.                                                             |
-| `help`             | `boolean` or `{ description?, short? }` | Whether to add `--help`, with `-h` if no option uses it (default: `true`).                                                |
-| `name`             | `string`                                | Name of the CLI, as typed to run it. **Required.**                                                                        |
-| `options`          | schema or `Record<string, schema>`      | Either one object schema, or a record of per-flag schemas. **Required.**                                                  |
-| `positionals`      | schema                                  | Schema for the array of positionals; if omitted, none are allowed.                                                        |
-| `positionalsUsage` | `string`                                | Usage text for positionals in help (default: from the schema's `placeholder`).                                            |
-| `strict`           | `boolean` or `"warn"`                   | Whether unknown flags and unexpected positionals are errors (default: `true`); `"warn"` ignores them but prints warnings. |
+| Setting            | Type                                            | Description                                                                                                               |
+| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `description`      | `string`                                        | Sentence(s) describing what the CLI does, for help text.                                                                  |
+| `examples`         | `string[]`                                      | Example commands, printed as-is in help text.                                                                             |
+| `footer`           | `string`                                        | Text printed at the end of help text, such as a link to docs.                                                             |
+| `help`             | `boolean` or `{ description?, short? }`         | Whether to add `--help`, with `-h` if no option uses it (default: `true`).                                                |
+| `name`             | `string`                                        | Name of the CLI, as typed to run it. **Required.**                                                                        |
+| `options`          | schema or `Record<string, schema>`              | Either one object schema, or a record of per-flag schemas. **Required.**                                                  |
+| `positionals`      | schema                                          | Schema for the array of positionals; if omitted, none are allowed.                                                        |
+| `positionalsUsage` | `string`                                        | Usage text for positionals in help (default: from the schema's `placeholder`).                                            |
+| `strict`           | `boolean` or `"warn"`                           | Whether unknown flags and unexpected positionals are errors (default: `true`); `"warn"` ignores them but prints warnings. |
+| `usage`            | `string`                                        | Usage text after the name in help, such as `[--dry-run] <patterns...>`.                                                   |
+| `version`          | `string` or `{ version, description?, short? }` | Version to print for `--version`, with `-v` if no option uses it.                                                         |
 
 With `strict: false` or `"warn"`, unknown flags are collected into `unknown`.
 If no `positionals` schema is given, an unknown flag takes the next arg as its value (unless it looks like a flag), as in `--old-flag value` for `{ "old-flag": "value" }`.
 If positionals are allowed, there's no way to tell whether that arg was meant as the unknown flag's value or as a positional, so it's a positional.
-| `usage` | `string` | Usage text after the name in help, such as `[--dry-run] <patterns...>`. |
-| `version` | `string` or `{ version, description?, short? }` | Version to print for `--version`, with `-v` if no option uses it. |
 
 `createCli` returns:
 
