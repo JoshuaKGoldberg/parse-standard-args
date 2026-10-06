@@ -1,0 +1,12 @@
+{
+	"dictionaries": ["npm", "node", "typescript"],
+	"ignorePaths": [
+		".all-contributorsrc",
+		"CHANGELOG.md",
+		"coverage",
+		"dist",
+		"node_modules",
+		"pnpm-lock.yaml"
+	],
+	"words": ["apexskier", "octoguide"]
+}
