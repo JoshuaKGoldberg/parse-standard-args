@@ -138,18 +138,62 @@ describe(createCli, () => {
 			]);
 		});
 
-		it("uses a custom short alias when one is given even if an option uses it", () => {
-			const cli = createCli({
-				help: { short: "x" },
-				name: "cli",
-				options: z.object({ x: z.string().optional().meta({ short: "x" }) }),
-			});
-
-			expect(cli.flags.map((flag) => [flag.key, flag.short])).toEqual([
-				["x", "x"],
-				["help", "x"],
-			]);
+		it("throws a TypeError when a built-in flag's custom short alias is used by an option", () => {
+			expect(() =>
+				createCli({
+					help: { short: "x" },
+					name: "cli",
+					options: z.object({ x: z.string().optional().meta({ short: "x" }) }),
+				}),
+			).toThrow(
+				new TypeError("--x and --help can't both use the short alias -x."),
+			);
 		});
+
+		it("throws a TypeError when two options use the same short alias", () => {
+			expect(() =>
+				createCli({
+					name: "cli",
+					options: z.object({
+						a: z.boolean().optional().meta({ short: "q" }),
+						b: z.string().optional().meta({ short: "q" }),
+					}),
+				}),
+			).toThrow(
+				new TypeError("--a and --b can't both use the short alias -q."),
+			);
+		});
+
+		it("throws a TypeError when the built-in flags' custom short aliases are the same", () => {
+			expect(() =>
+				createCli({
+					help: { short: "x" },
+					name: "cli",
+					options: z.object({}),
+					version: { short: "x", version: "1.2.3" },
+				}),
+			).toThrow(
+				new TypeError(
+					"--help and --version can't both use the short alias -x.",
+				),
+			);
+		});
+
+		it.each(["ab", ""])(
+			"throws a TypeError when a short alias is %j",
+			(short) => {
+				expect(() =>
+					createCli({
+						name: "cli",
+						options: z.object({ all: z.boolean().optional().meta({ short }) }),
+					}),
+				).toThrow(
+					new TypeError(
+						`--all's short alias must be a single character, but it's "${short}".`,
+					),
+				);
+			},
+		);
 	});
 
 	describe("parse", () => {
@@ -369,6 +413,7 @@ describe(createCli, () => {
 				],
 				text: "Unknown flag: --help",
 				type: "error",
+				warnings: [],
 			});
 		});
 
@@ -472,6 +517,7 @@ describe(createCli, () => {
 			expect(await cli.parse(["--version", "--owner", "me"])).toMatchObject({
 				text: "Unknown flag: --version\nRun 'cli --help' for usage.",
 				type: "error",
+				warnings: [],
 			});
 		});
 
@@ -488,6 +534,7 @@ describe(createCli, () => {
 				],
 				text: `--bandwidth: Expected a number, received "abc".\nRun 'cli --help' for usage.`,
 				type: "error",
+				warnings: [],
 			});
 		});
 
@@ -500,6 +547,7 @@ describe(createCli, () => {
 				],
 				text: "--owner is required.",
 				type: "error",
+				warnings: [],
 			});
 		});
 
@@ -512,6 +560,7 @@ describe(createCli, () => {
 				],
 				text: "--owner is required.\nRun 'cli --help' for usage.",
 				type: "error",
+				warnings: [],
 			});
 		});
 
@@ -527,6 +576,7 @@ describe(createCli, () => {
 				],
 				text: "--name is required.\nRun 'cli --help' for usage.",
 				type: "error",
+				warnings: [],
 			});
 		});
 
@@ -543,6 +593,7 @@ describe(createCli, () => {
 				],
 				text: "--owner requires a value.\nRun 'cli --help' for usage.",
 				type: "error",
+				warnings: [],
 			});
 		});
 
@@ -571,6 +622,7 @@ describe(createCli, () => {
 					"Run 'cli --help' for usage.",
 				].join("\n"),
 				type: "error",
+				warnings: [],
 			});
 		});
 
@@ -617,6 +669,7 @@ describe(createCli, () => {
 					"Run 'cli --help' for usage.",
 				].join("\n"),
 				type: "error",
+				warnings: [],
 			});
 		});
 
@@ -676,7 +729,170 @@ describe(createCli, () => {
 				],
 				text: "--owner requires a value.\nRun 'cli --help' for usage.",
 				type: "error",
+				warnings: [],
 			});
+		});
+
+		it("does not report a missing flag when its schema accepts it being missing", async () => {
+			const cli = createCli({
+				name: "cli",
+				options: z.object({
+					name: z.preprocess((value) => value ?? "anonymous", z.string()),
+				}),
+			});
+
+			expect(await cli.parse([])).toEqual({
+				positionals: [],
+				type: "values",
+				unknown: {},
+				values: { name: "anonymous" },
+				warnings: [],
+			});
+		});
+
+		it("reports a missing flag as required when its schema rejects it being missing, even if it has no required JSON Schema", async () => {
+			const cli = createCli({
+				name: "cli",
+				options: z.object({ value: z.custom<string>((value) => !!value) }),
+			});
+
+			expect(await cli.parse([])).toEqual({
+				issues: [
+					{ flag: "value", kind: "missing", message: "--value is required." },
+				],
+				text: "--value is required.\nRun 'cli --help' for usage.",
+				type: "error",
+				warnings: [],
+			});
+		});
+
+		it("reports missing flags named like object properties as required", async () => {
+			const cli = createCli({
+				name: "cli",
+				options: z.object({ constructor: z.string(), toString: z.string() }),
+			});
+
+			expect(await cli.parse([])).toMatchObject({
+				issues: [
+					{ flag: "constructor", kind: "missing" },
+					{ flag: "toString", kind: "missing" },
+				],
+				type: "error",
+			});
+			expect(
+				await cli.parse(["--constructor", "a", "--toString", "b"]),
+			).toMatchObject({
+				type: "values",
+				values: { constructor: "a", toString: "b" },
+			});
+		});
+
+		it("returns values when a record of schemas has a flag named __proto__", async () => {
+			const options = Object.fromEntries([
+				["__proto__", z.object({ polluted: z.boolean() })],
+			]) as Record<string, z.ZodType>;
+			const cli = createCli({ name: "cli", options });
+
+			const result = await cli.parse(["--__proto__", '{"polluted":true}']);
+
+			expect(result.type === "values" && Object.entries(result.values)).toEqual(
+				[["__proto__", { polluted: true }]],
+			);
+			expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+		});
+
+		it("includes warnings when an error is returned and strict is warn", async () => {
+			const cli = createCli({
+				name: "cli",
+				options: z.object({ count: z.number() }),
+				strict: "warn",
+			});
+
+			expect(await cli.parse(["--bogus", "--count", "x"])).toEqual({
+				issues: [
+					{
+						flag: "count",
+						kind: "invalid",
+						message: '--count: Expected a number, received "x".',
+					},
+				],
+				text: `--count: Expected a number, received "x".\nRun 'cli --help' for usage.`,
+				type: "error",
+				warnings: [
+					{ flag: "bogus", kind: "unknown", message: "Unknown flag: --bogus" },
+				],
+			});
+		});
+
+		it("omits usage guidance from errors when an option replaces the built-in help flag", async () => {
+			const cli = createCli({
+				name: "cli",
+				options: z.object({ help: z.string().optional() }),
+			});
+
+			expect(await cli.parse(["--bogus"])).toMatchObject({
+				text: "Unknown flag: --bogus",
+				type: "error",
+			});
+		});
+
+		it("includes the terminator index when -- is given", async () => {
+			const cli = createCli({
+				name: "cli",
+				options: z.object({}),
+				positionals: z.array(z.string()),
+			});
+
+			expect(await cli.parse(["a", "--", "--b"])).toEqual({
+				positionals: ["a", "--b"],
+				terminatorIndex: 1,
+				type: "values",
+				unknown: {},
+				values: {},
+				warnings: [],
+			});
+		});
+
+		it("returns a negative number positional when positionals are numbers", async () => {
+			const cli = createCli({
+				name: "cli",
+				options: z.object({}),
+				positionals: z.array(z.number()),
+			});
+
+			expect(await cli.parse(["-5", "3"])).toMatchObject({
+				positionals: [-5, 3],
+				type: "values",
+			});
+		});
+
+		it("returns converted values when options are mixed unions", async () => {
+			const cli = createCli({
+				name: "cli",
+				options: z.object({
+					concurrency: z.union([z.literal("auto"), z.number()]),
+					level: z.literal(["a", 1, true]),
+				}),
+			});
+
+			expect(
+				await cli.parse(["--concurrency", "4", "--level", "1"]),
+			).toMatchObject({ values: { concurrency: 4, level: 1 } });
+			expect(
+				await cli.parse(["--concurrency", "auto", "--level", "true"]),
+			).toMatchObject({ values: { concurrency: "auto", level: true } });
+		});
+
+		it("throws a TypeError when options are not an object schema", () => {
+			expect(() =>
+				createCli({
+					name: "cli",
+					options: z.union([
+						z.object({ a: z.string() }),
+						z.object({ b: z.string() }),
+					]),
+				}),
+			).toThrow(TypeError);
 		});
 
 		it("reports an unexpected positional when no positionals schema is given", async () => {
@@ -686,6 +902,7 @@ describe(createCli, () => {
 				issues: [{ kind: "unexpected", message: "Unexpected argument: stray" }],
 				text: "Unexpected argument: stray\nRun 'cli --help' for usage.",
 				type: "error",
+				warnings: [],
 			});
 		});
 
@@ -724,6 +941,7 @@ describe(createCli, () => {
 					"Run 'cli --help' for usage.",
 				].join("\n"),
 				type: "error",
+				warnings: [],
 			});
 			expect(await cli.parse(["abc"])).toEqual({
 				issues: [
@@ -731,22 +949,37 @@ describe(createCli, () => {
 						kind: "invalid",
 						message: 'Argument 1: Expected a number, received "abc".',
 					},
-					{
-						kind: "validation",
-						message: "Too small: expected array to have >=1 items",
-					},
 				],
 				text: [
 					'Argument 1: Expected a number, received "abc".',
-					"Too small: expected array to have >=1 items",
 					"Run 'cli --help' for usage.",
 				].join("\n"),
 				type: "error",
+				warnings: [],
 			});
 		});
 	});
 
 	describe("formatHelp", () => {
+		it("includes defaults when options are an ArkType schema with defaults", () => {
+			const cli = createCli({
+				help: false,
+				name: "cli",
+				options: type({
+					color: ["boolean", "=", true],
+					count: ["number", "=", 5],
+				}),
+			});
+
+			expect(cli.formatHelp()).toMatchInlineSnapshot(`
+				"Usage: cli [options]
+
+				Options:
+				  --[no-]color      (default: true)
+				  --count <number>  (default: 5)"
+			`);
+		});
+
 		it("wraps descriptions to the terminal width when stdout is a TTY", () => {
 			setStdout({ columns: 40, isTTY: true });
 
@@ -958,14 +1191,35 @@ describe(createCli, () => {
 				strict: "warn",
 			});
 
-			expect(await cli.run(["--extra", "stray"], { warn })).toMatchObject({
+			expect(
+				await cli.run(["--extra", "value", "--other"], { warn }),
+			).toMatchObject({
 				type: "values",
-				unknown: { extra: true },
+				unknown: { extra: "value", other: true },
 			});
 			expect(warn).toHaveBeenCalledWith(
-				"Unknown flag: --extra\nUnexpected argument: stray",
+				"Unknown flag: --extra\nUnknown flag: --other",
 			);
 			expect(process.exitCode).toBeUndefined();
+		});
+
+		it("prints warnings before errors when strict is warn and args are invalid", async () => {
+			const calls: string[] = [];
+			const cli = createCli({
+				name: "cli",
+				options: z.object({ count: z.number() }),
+				strict: "warn",
+			});
+
+			await cli.run(["--bogus"], {
+				error: (text) => calls.push(`error: ${text}`),
+				warn: (text) => calls.push(`warn: ${text}`),
+			});
+
+			expect(calls).toEqual([
+				"warn: Unknown flag: --bogus",
+				"error: --count is required.\nRun 'cli --help' for usage.",
+			]);
 		});
 
 		it("does not print warnings when there are none", async () => {

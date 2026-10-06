@@ -1,4 +1,4 @@
-// cspell:ignore dryrun repo wacth
+// cspell:ignore afile dryrun repo tokn wacth
 import { describe, expect, it } from "vitest";
 
 import type { FlagDescriptor, FlagKind } from "./types.ts";
@@ -253,6 +253,7 @@ describe(parseRawArgs, () => {
 					issues: [
 						{ kind: "unexpected", message: "Unexpected argument: false" },
 					],
+					terminatorIndex: 0,
 					values: { quiet: true },
 				}),
 			);
@@ -622,6 +623,280 @@ describe(parseRawArgs, () => {
 		});
 	});
 
+	describe("mixed flags", () => {
+		const flags = [
+			createFlag("concurrency", "mixed", {
+				choices: ["auto"],
+				types: ["number"],
+			}),
+			createFlag("color", "mixed", { types: ["string", "boolean"] }),
+			createFlag("level", "mixed", { choices: ["a", 1, true], types: [] }),
+			createFlag("sizes", "mixed", {
+				multiple: true,
+				types: ["integer", "string"],
+			}),
+		];
+
+		it("converts the value to a choice when it matches one", () => {
+			expect(
+				parseRawArgs({
+					args: ["--concurrency", "auto", "--level", "1", "--level=true"],
+					flags,
+				}).values,
+			).toEqual({ concurrency: "auto", level: true });
+			expect(parseRawArgs({ args: ["--level", "1"], flags }).values).toEqual({
+				level: 1,
+			});
+		});
+
+		it("converts the value to a number when it is numeric and numbers are allowed", () => {
+			expect(
+				parseRawArgs({ args: ["--concurrency", "-2.5"], flags }).values,
+			).toEqual({ concurrency: -2.5 });
+		});
+
+		it("converts the value to a boolean when it is true or false and booleans are allowed", () => {
+			expect(
+				parseRawArgs({ args: ["--color", "false"], flags }).values,
+			).toEqual({ color: false });
+		});
+
+		it("keeps the value as a string when it matches no other allowed type", () => {
+			expect(
+				parseRawArgs({ args: ["--color", "red", "--concurrency", "x"], flags })
+					.values,
+			).toEqual({ color: "red", concurrency: "x" });
+		});
+
+		it("sets true when the flag allows booleans and is given without a value", () => {
+			expect(parseRawArgs({ args: ["--color"], flags })).toEqual(
+				createResult({ values: { color: true } }),
+			);
+		});
+
+		it("sets true when the flag's choices include true and it is given without a value", () => {
+			expect(parseRawArgs({ args: ["--level"], flags }).values).toEqual({
+				level: true,
+			});
+		});
+
+		it("reports an issue when the flag doesn't allow booleans and is given without a value", () => {
+			expect(parseRawArgs({ args: ["--concurrency"], flags }).issues).toEqual([
+				{
+					flag: "concurrency",
+					kind: "invalid",
+					message: "--concurrency requires a value.",
+				},
+			]);
+		});
+
+		it("reports an issue when the value isn't one of the flag's only choices", () => {
+			expect(parseRawArgs({ args: ["--level", "b"], flags }).issues).toEqual([
+				{
+					flag: "level",
+					kind: "invalid",
+					message: '--level: Expected "a", 1, or true, received "b".',
+				},
+			]);
+		});
+
+		it("converts each value when the flag is multiple", () => {
+			expect(
+				parseRawArgs({ args: ["--sizes", "1", "--sizes", "lg"], flags }).values,
+			).toEqual({ sizes: [1, "lg"] });
+		});
+	});
+
+	describe("values starting with a dash", () => {
+		const flags = [
+			createFlag("all", "boolean", { short: "a" }),
+			createFlag("file", "string", { short: "f" }),
+			createFlag("quiet", "boolean", { short: "q" }),
+			createFlag("words", "string"),
+		];
+
+		it("takes the value when it isn't made of known short flags", () => {
+			expect(parseRawArgs({ args: ["--words", "-dashy"], flags })).toEqual(
+				createResult({ values: { words: "-dashy" } }),
+			);
+		});
+
+		it("takes the value when it is a lone dash", () => {
+			expect(parseRawArgs({ args: ["--words", "-"], flags }).values).toEqual({
+				words: "-",
+			});
+		});
+
+		it("reports an issue when the value is a group of known boolean short flags", () => {
+			expect(parseRawArgs({ args: ["--words", "-aq"], flags })).toEqual(
+				createResult({
+					issues: [
+						{
+							flag: "words",
+							kind: "invalid",
+							message: "--words requires a value.",
+						},
+					],
+					values: { all: true, quiet: true },
+				}),
+			);
+		});
+
+		it("reports an issue when the value starts with a known short flag that takes a value", () => {
+			expect(parseRawArgs({ args: ["--words", "-afile"], flags })).toEqual(
+				createResult({
+					issues: [
+						{
+							flag: "words",
+							kind: "invalid",
+							message: "--words requires a value.",
+						},
+					],
+					values: { all: true, file: "ile" },
+				}),
+			);
+		});
+
+		it("reports an issue when the value starts with two dashes", () => {
+			expect(parseRawArgs({ args: ["--words", "--"], flags })).toEqual(
+				createResult({
+					issues: [
+						{
+							flag: "words",
+							kind: "invalid",
+							message: "--words requires a value.",
+						},
+					],
+					terminatorIndex: 0,
+				}),
+			);
+		});
+	});
+
+	describe("short flags with inline values", () => {
+		const flags = [
+			createFlag("filename", "string", { short: "f" }),
+			createFlag("quiet", "boolean", { short: "q" }),
+		];
+
+		it("sets the value when a short flag is given one with an equals sign", () => {
+			expect(parseRawArgs({ args: ["-f=a=b"], flags })).toEqual(
+				createResult({ values: { filename: "a=b" } }),
+			);
+		});
+
+		it("sets a boolean value when a boolean short flag is given one with an equals sign", () => {
+			expect(parseRawArgs({ args: ["-q=false"], flags }).values).toEqual({
+				quiet: false,
+			});
+		});
+
+		it("reports an issue with the long name when a boolean short flag is given an invalid value", () => {
+			expect(parseRawArgs({ args: ["-q=yes"], flags }).issues).toEqual([
+				{
+					flag: "quiet",
+					kind: "invalid",
+					message: '--quiet: Expected true or false, received "yes".',
+				},
+			]);
+		});
+
+		it("does not rewrite args after --", () => {
+			expect(
+				parseRawArgs({
+					args: ["-f=a", "--", "-f=b"],
+					flags,
+					positionals: { kinds: [], rest: "string" },
+				}),
+			).toEqual(
+				createResult({
+					positionals: ["-f=b"],
+					terminatorIndex: 0,
+					values: { filename: "a" },
+				}),
+			);
+		});
+	});
+
+	describe("unknown short flags", () => {
+		const flags = [
+			createFlag("all", "boolean", { short: "a" }),
+			createFlag("e", "string"),
+		];
+
+		it("reports one issue for a group when it contains unknown short flags", () => {
+			expect(parseRawArgs({ args: ["-weird.js"], flags })).toEqual(
+				createResult({
+					issues: [
+						{
+							flag: "w",
+							kind: "unknown",
+							message: "Unknown flag: -w (in -weird.js)",
+						},
+					],
+				}),
+			);
+		});
+
+		it("does not apply known short flags in a group with unknown ones", () => {
+			expect(parseRawArgs({ args: ["-az"], flags })).toEqual(
+				createResult({
+					issues: [
+						{
+							flag: "z",
+							kind: "unknown",
+							message: "Unknown flag: -z (in -az)",
+						},
+					],
+				}),
+			);
+		});
+
+		it("treats a short flag matching a long-only flag's name as unknown", () => {
+			expect(parseRawArgs({ args: ["-e", "x"], flags })).toEqual(
+				createResult({
+					issues: [{ flag: "e", kind: "unknown", message: "Unknown flag: -e" }],
+				}),
+			);
+		});
+
+		it("includes a hint about -- when positionals are allowed", () => {
+			expect(
+				parseRawArgs({
+					args: ["-weird.js"],
+					flags,
+					positionals: { kinds: [], rest: "string" },
+				}).issues,
+			).toEqual([
+				{
+					flag: "w",
+					kind: "unknown",
+					message:
+						'Unknown flag: -w (in -weird.js). Arguments starting with "-" can be passed after "--".',
+				},
+			]);
+		});
+
+		it("collects each unknown short flag into unknown when not strict", () => {
+			expect(parseRawArgs({ args: ["-xay"], flags, strict: false })).toEqual(
+				createResult({ unknown: { x: true, y: true } }),
+			);
+		});
+
+		it("collects an unknown short flag's value into unknown when not strict and no positionals are allowed", () => {
+			expect(
+				parseRawArgs({ args: ["-z", "value"], flags, strict: "warn" }),
+			).toEqual(
+				createResult({
+					unknown: { z: "value" },
+					warnings: [
+						{ flag: "z", kind: "unknown", message: "Unknown flag: -z" },
+					],
+				}),
+			);
+		});
+	});
+
 	describe("unknown flags", () => {
 		const flags = [
 			createFlag("dryRun", "boolean"),
@@ -719,6 +994,78 @@ describe(parseRawArgs, () => {
 			]);
 		});
 
+		it("suggests the flag with a matching short alias when given a single-character long flag", () => {
+			expect(
+				parseRawArgs({
+					args: ["--w"],
+					flags: [createFlag("watch", "number", { short: "w" })],
+				}).issues,
+			).toEqual([
+				{
+					flag: "w",
+					kind: "unknown",
+					message: "Unknown flag: --w",
+					suggestion: "watch",
+				},
+			]);
+		});
+
+		it("does not suggest hidden flags", () => {
+			expect(
+				parseRawArgs({
+					args: ["--secretTokn", "--s"],
+					flags: [
+						createFlag("secretToken", "string", { hidden: true, short: "s" }),
+					],
+				}).issues,
+			).toEqual([
+				{
+					flag: "secretTokn",
+					kind: "unknown",
+					message: "Unknown flag: --secretTokn",
+				},
+				{ flag: "s", kind: "unknown", message: "Unknown flag: --s" },
+			]);
+		});
+
+		it("collects the flag's next arg as its value when not strict and no positionals are allowed", () => {
+			expect(
+				parseRawArgs({
+					args: ["--extra", "value", "--other", "--watch", "1", "--last"],
+					flags,
+					strict: false,
+				}),
+			).toEqual(
+				createResult({
+					unknown: { extra: "value", last: true, other: true },
+					values: { watch: 1 },
+				}),
+			);
+		});
+
+		it("does not collect the flag's next arg as its value when not strict and positionals are allowed", () => {
+			expect(
+				parseRawArgs({
+					args: ["--extra", "value"],
+					flags,
+					positionals: { kinds: [], rest: "string" },
+					strict: "warn",
+				}),
+			).toEqual(
+				createResult({
+					positionals: ["value"],
+					unknown: { extra: true },
+					warnings: [
+						{
+							flag: "extra",
+							kind: "unknown",
+							message: "Unknown flag: --extra",
+						},
+					],
+				}),
+			);
+		});
+
 		it("collects the flag into unknown when not strict", () => {
 			expect(
 				parseRawArgs({
@@ -760,6 +1107,26 @@ describe(parseRawArgs, () => {
 					],
 				}),
 			);
+		});
+	});
+
+	describe("flag names", () => {
+		it("keeps values when flags are named like object properties", () => {
+			const result = parseRawArgs({
+				args: ["--constructor", "a", "--__proto__", "b", "--toString=c"],
+				flags: [
+					createFlag("constructor", "string"),
+					createFlag("__proto__", "string"),
+				],
+				strict: false,
+			});
+
+			expect(Object.entries(result.values)).toEqual([
+				["constructor", "a"],
+				["__proto__", "b"],
+			]);
+			expect(Object.entries(result.unknown)).toEqual([["toString", "c"]]);
+			expect(Object.getPrototypeOf(result.values)).toBeNull();
 		});
 	});
 
@@ -918,9 +1285,131 @@ describe(parseRawArgs, () => {
 			).toEqual(
 				createResult({
 					positionals: ["--name", "-5", "y"],
+					terminatorIndex: 0,
 					values: { name: "x" },
 				}),
 			);
+		});
+
+		it("includes how many positionals came before -- when there is one", () => {
+			expect(
+				parseRawArgs({
+					args: ["a", "b", "--", "c"],
+					flags: [],
+					positionals: { kinds: [], rest: "string" },
+				}),
+			).toEqual(
+				createResult({ positionals: ["a", "b", "c"], terminatorIndex: 2 }),
+			);
+		});
+
+		it("does not count positionals that failed to convert before --", () => {
+			expect(
+				parseRawArgs({
+					args: ["1", "x", "--", "2"],
+					flags: [],
+					positionals: { kinds: [], rest: "number" },
+				}),
+			).toEqual(
+				createResult({
+					issues: [
+						{
+							kind: "invalid",
+							message: 'Argument 2: Expected a number, received "x".',
+						},
+					],
+					positionals: [1, 2],
+					terminatorIndex: 1,
+				}),
+			);
+		});
+
+		it("treats a negative number as a positional when a numeric positional is next", () => {
+			expect(
+				parseRawArgs({
+					args: ["-5", "-1.5", "-2"],
+					flags: [createFlag("verbose", "boolean", { short: "v" })],
+					positionals: {
+						kinds: ["number", { kind: "mixed", types: ["integer"] }],
+						rest: "string",
+					},
+				}),
+			).toEqual(
+				createResult({
+					issues: [
+						{
+							flag: "2",
+							kind: "unknown",
+							message:
+								'Unknown flag: -2. Arguments starting with "-" can be passed after "--".',
+						},
+					],
+					positionals: [-5, -1.5],
+				}),
+			);
+		});
+
+		it("treats a negative number as an unknown flag when positionals are not allowed", () => {
+			expect(parseRawArgs({ args: ["-5"], flags: [] }).issues).toEqual([
+				{ flag: "5", kind: "unknown", message: "Unknown flag: -5" },
+			]);
+		});
+
+		it("treats a negative number as an unknown flag when the next positional is not numeric", () => {
+			expect(
+				parseRawArgs({
+					args: ["-5"],
+					flags: [],
+					positionals: { kinds: [{ kind: "mixed", types: ["string"] }] },
+				}).issues,
+			).toEqual([
+				{
+					flag: "5",
+					kind: "unknown",
+					message:
+						'Unknown flag: -5. Arguments starting with "-" can be passed after "--".',
+				},
+			]);
+		});
+
+		it("treats a negative number as a flag when its first digit is a known short flag", () => {
+			expect(
+				parseRawArgs({
+					args: ["-1"],
+					flags: [createFlag("one", "boolean", { short: "1" })],
+					positionals: { kinds: [], rest: "number" },
+				}),
+			).toEqual(createResult({ values: { one: true } }));
+		});
+
+		it("converts mixed positionals per their choices and types", () => {
+			expect(
+				parseRawArgs({
+					args: ["auto", "5", "true", "x"],
+					flags: [],
+					positionals: {
+						kinds: [{ choices: ["auto"], kind: "mixed", types: ["number"] }],
+						rest: { kind: "mixed", types: ["number", "boolean"] },
+					},
+				}),
+			).toEqual(createResult({ positionals: ["auto", 5, true, "x"] }));
+		});
+
+		it("reports an issue when a mixed positional isn't one of its only choices", () => {
+			expect(
+				parseRawArgs({
+					args: ["c"],
+					flags: [],
+					positionals: {
+						kinds: [{ choices: ["a", 1], kind: "mixed", types: [] }],
+					},
+				}).issues,
+			).toEqual([
+				{
+					kind: "invalid",
+					message: 'Argument 1: Expected "a" or 1, received "c".',
+				},
+			]);
 		});
 
 		it("reports args after -- when positionals are not allowed", () => {

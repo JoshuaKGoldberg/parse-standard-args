@@ -1,21 +1,23 @@
 import type {
 	ArgsSchema,
 	FlagDescriptor,
-	FlagKind,
+	FlagValueType,
 	OptionsDefinition,
+	ValueDescription,
 } from "./types.ts";
 
 import {
 	getJsonSchema,
+	getSupplementalJsonSchemas,
 	isArgsSchema,
 	type JsonSchema,
 } from "./getJsonSchema.ts";
 
-interface TypeDescription {
-	choices?: readonly unknown[];
-	kind: FlagKind;
+interface TypeDescription extends ValueDescription {
 	multiple: boolean;
 }
+
+type ValueCategory = "boolean" | "number" | "other" | "string";
 
 /**
  * Describes each flag in an options definition, using its JSON Schema.
@@ -25,20 +27,41 @@ interface TypeDescription {
 export function describeOptions(options: OptionsDefinition): FlagDescriptor[] {
 	if (isArgsSchema(options)) {
 		const root = getJsonSchema(options);
-		const object = resolveReference(root, root);
+		const object = getObjectSchema(root, root);
+
+		if (!object) {
+			throw new TypeError(
+				`Options schemas must describe an object of flags, such as z.object({ ... }), but the schema from ${options["~standard"].vendor} doesn't. Unions, intersections, and other non-object schemas aren't supported.`,
+			);
+		}
+
 		const properties = (object.properties ?? {}) as Record<string, JsonSchema>;
 		const required = new Set((object.required ?? []) as string[]);
+		const getSupplementalDefault = createSupplementalDefaultGetter(
+			options,
+			(supplemental) =>
+				getObjectSchema(supplemental, supplemental)?.properties as
+					Record<string, JsonSchema> | undefined,
+		);
 
 		return Object.entries(properties).map(([key, property]) =>
-			describeFlag(key, property, root, required.has(key)),
+			describeFlag(key, property, root, required.has(key), () =>
+				getSupplementalDefault(key),
+			),
 		);
 	}
 
 	return Object.entries(options).map(([key, schema]) => {
 		const root = getJsonSchema(schema);
+		const getSupplementalDefault = createSupplementalDefaultGetter(
+			schema,
+			(supplemental) => ({ [key]: supplemental }),
+		);
 
 		return {
-			...describeFlag(key, root, root, isRequiredSchema(schema)),
+			...describeFlag(key, root, root, isRequiredSchema(schema), () =>
+				getSupplementalDefault(key),
+			),
 			schema,
 		};
 	});
@@ -58,7 +81,9 @@ export function describePositionals(positionals: ArgsSchema) {
 
 	return {
 		description: array.description as string | undefined,
-		kinds: prefixItems.map((item) => describeType(item, root).kind),
+		kinds: prefixItems.map((item) =>
+			toPositionalKind(describeType(item, root)),
+		),
 		maxItems:
 			typeof array.maxItems === "number"
 				? array.maxItems
@@ -68,9 +93,44 @@ export function describePositionals(positionals: ArgsSchema) {
 		minItems: typeof array.minItems === "number" ? array.minItems : undefined,
 		placeholder: array.placeholder as string | undefined,
 		rest:
-			typeof items === "object" ? describeType(items, root).kind : undefined,
+			typeof items === "object"
+				? toPositionalKind(describeType(items, root))
+				: undefined,
 		root,
 	};
+}
+
+function createSupplementalDefaultGetter(
+	schema: ArgsSchema,
+	getProperties: (
+		supplemental: JsonSchema,
+	) => Record<string, JsonSchema> | undefined,
+) {
+	let supplementals: JsonSchema[] | undefined;
+
+	return (key: string) => {
+		supplementals ??= getSupplementalJsonSchemas(schema);
+
+		for (const supplemental of supplementals) {
+			const property = getProperties(supplemental)?.[key];
+			const merged = property && mergeWrappers(property, supplemental);
+
+			if (merged && "default" in merged) {
+				return { default: merged.default };
+			}
+		}
+
+		return undefined;
+	};
+}
+
+function describeChoices(choices: readonly unknown[]): TypeDescription {
+	const categories = new Set(choices.map(getValueCategory));
+	const [category] = categories;
+
+	return categories.size === 1 && category !== "other"
+		? { choices, kind: category, multiple: false }
+		: { choices, kind: "mixed", multiple: false, types: [] };
 }
 
 function describeFlag(
@@ -78,13 +138,20 @@ function describeFlag(
 	property: JsonSchema,
 	root: JsonSchema,
 	required: boolean,
+	getSupplementalDefault: () => undefined | { default: unknown },
 ): FlagDescriptor {
 	const merged = mergeWrappers(property, root);
 	const type = describeType(merged, root);
 
+	// Some libraries, such as ArkType, leave defaults out of input JSON Schemas.
+	const defaulted =
+		"default" in merged
+			? { default: merged.default }
+			: getSupplementalDefault();
+
 	return {
 		...(type.choices && { choices: type.choices }),
-		...("default" in merged && { default: merged.default }),
+		...defaulted,
 		...stringProperty(merged, "defaultDescription"),
 		...stringProperty(merged, "description"),
 		...(merged.hidden === true && { hidden: true }),
@@ -92,8 +159,9 @@ function describeFlag(
 		kind: type.kind,
 		multiple: type.multiple,
 		...stringProperty(merged, "placeholder"),
-		required: required && !("default" in merged),
+		required: required && !defaulted,
 		...stringProperty(merged, "short"),
+		...(type.types && { types: type.types }),
 	};
 }
 
@@ -102,16 +170,13 @@ function describeType(schema: JsonSchema, root: JsonSchema): TypeDescription {
 	const choices = getChoices(merged, root);
 
 	if (choices) {
-		return { choices, kind: kindOfValues(choices), multiple: false };
+		return describeChoices(choices);
 	}
 
 	const types = getTypes(merged);
 
 	if (types.length !== 1) {
-		return {
-			kind: types.length && types.every(isNumericType) ? "number" : "string",
-			multiple: false,
-		};
+		return describeUnion(merged, root);
 	}
 
 	switch (types[0]) {
@@ -126,6 +191,7 @@ function describeType(schema: JsonSchema, root: JsonSchema): TypeDescription {
 						? "json"
 						: element.kind,
 				multiple: true,
+				...(element?.types && { types: element.types }),
 			};
 		}
 
@@ -139,6 +205,80 @@ function describeType(schema: JsonSchema, root: JsonSchema): TypeDescription {
 
 		default:
 			return { kind: "string", multiple: false };
+	}
+}
+
+/**
+ * Describes a union of types and/or literals, such as `"auto" | number`.
+ * Unions of one category of primitive, such as `number | integer`, are that primitive;
+ * unions of several, such as `number | boolean`, are "mixed".
+ */
+function describeUnion(schema: JsonSchema, root: JsonSchema): TypeDescription {
+	const literals: unknown[] = [];
+	const types = new Set<string>();
+
+	gatherUnion(schema, root, literals, types);
+
+	const categories = new Set([
+		...literals.map(getValueCategory),
+		...[...types].map(getTypeCategory),
+	]);
+
+	if (!types.size || categories.has("other")) {
+		return { kind: "string", multiple: false };
+	}
+
+	if (categories.size === 1) {
+		const [category] = categories as Set<Exclude<ValueCategory, "other">>;
+
+		return {
+			kind:
+				category === "number" &&
+				!types.has("number") &&
+				literals.every(Number.isInteger)
+					? "integer"
+					: category,
+			multiple: false,
+		};
+	}
+
+	return {
+		...(literals.length && { choices: literals }),
+		kind: "mixed",
+		multiple: false,
+		types: [...types].filter(
+			(type): type is FlagValueType =>
+				!(type === "integer" && types.has("number")),
+		),
+	};
+}
+
+function gatherUnion(
+	schema: JsonSchema,
+	root: JsonSchema,
+	literals: unknown[],
+	types: Set<string>,
+) {
+	const merged = mergeWrappers(schema, root);
+	const choices = getChoices(merged, root);
+
+	if (choices) {
+		literals.push(...choices);
+		return;
+	}
+
+	const constituents = getConstituents(merged);
+
+	if (constituents?.length && !merged.type) {
+		for (const constituent of constituents) {
+			gatherUnion(constituent, root, literals, types);
+		}
+
+		return;
+	}
+
+	for (const type of getTypes(merged)) {
+		types.add(type);
 	}
 }
 
@@ -180,6 +320,32 @@ function getConstituents(schema: JsonSchema) {
 	return constituents?.filter((constituent) => constituent.type !== "null");
 }
 
+function getObjectSchema(schema: JsonSchema, root: JsonSchema) {
+	const object = mergeWrappers(schema, root);
+
+	return object.type === "object" ||
+		(object.type === undefined &&
+			typeof object.properties === "object" &&
+			!object.anyOf &&
+			!object.oneOf &&
+			!object.allOf)
+		? object
+		: undefined;
+}
+
+function getTypeCategory(type: string): ValueCategory {
+	switch (type) {
+		case "boolean":
+		case "string":
+			return type;
+		case "integer":
+		case "number":
+			return "number";
+		default:
+			return "other";
+	}
+}
+
 function getTypes(schema: JsonSchema): string[] {
 	if (typeof schema.type === "string") {
 		return schema.type === "null" ? [] : [schema.type];
@@ -196,8 +362,12 @@ function getTypes(schema: JsonSchema): string[] {
 		: ["string"];
 }
 
-function isNumericType(type: string) {
-	return type === "integer" || type === "number";
+function getValueCategory(value: unknown): ValueCategory {
+	const type = typeof value;
+
+	return type === "boolean" || type === "number" || type === "string"
+		? type
+		: "other";
 }
 
 function isRequiredSchema(schema: ArgsSchema) {
@@ -212,18 +382,6 @@ function isRequiredSchema(schema: ArgsSchema) {
 
 	// Async schemas can't be checked synchronously, so they're assumed optional.
 	return !(result instanceof Promise) && !!result.issues;
-}
-
-function kindOfValues(values: readonly unknown[]): FlagKind {
-	if (values.every((value) => typeof value === "boolean")) {
-		return "boolean";
-	}
-
-	if (values.every((value) => typeof value === "number")) {
-		return "number";
-	}
-
-	return "string";
 }
 
 /**
@@ -251,16 +409,34 @@ function resolveReference(schema: JsonSchema, root: JsonSchema): JsonSchema {
 	}
 
 	const { $ref, ...rest } = schema;
-	const path = $ref.replace(/^#\//, "").split("/");
+	const path = $ref.replace(/^#\/?/, "").split("/").filter(Boolean);
 	let target: unknown = root;
 
 	for (const segment of path) {
-		target = (target as Record<string, unknown> | undefined)?.[segment];
+		target = (target as Record<string, unknown> | undefined)?.[
+			decodePointerSegment(segment)
+		];
 	}
 
 	return target
 		? { ...resolveReference(target as JsonSchema, root), ...rest }
 		: rest;
+}
+
+/**
+ * Decodes a JSON Pointer segment in a URI fragment, such as `a~1b` for `a/b`.
+ * @see https://datatracker.ietf.org/doc/html/rfc6901
+ */
+function decodePointerSegment(segment: string) {
+	let decoded = segment;
+
+	try {
+		decoded = decodeURIComponent(segment);
+	} catch {
+		// Segments that aren't valid URI encodings are used as-is.
+	}
+
+	return decoded.replaceAll("~1", "/").replaceAll("~0", "~");
 }
 
 function stringProperty<Key extends string>(schema: JsonSchema, key: Key) {
@@ -269,4 +445,10 @@ function stringProperty<Key extends string>(schema: JsonSchema, key: Key) {
 	return (typeof value === "string" ? { [key]: value } : {}) as Partial<
 		Record<Key, string>
 	>;
+}
+
+function toPositionalKind({ choices, kind, types }: TypeDescription) {
+	return kind === "mixed"
+		? ({ ...(choices && { choices }), kind, types } as ValueDescription)
+		: kind;
 }

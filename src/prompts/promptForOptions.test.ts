@@ -1,6 +1,6 @@
 import type { TextOptions } from "@clack/prompts";
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 
 import type { ArgsSchema, FlagDescriptor, FlagKind } from "../types.ts";
@@ -11,6 +11,8 @@ import { promptForFlag, promptForOptions } from "./promptForOptions.ts";
 const cancel = Symbol("cancel");
 
 const mockConfirm = vi.fn();
+const mockLogError = vi.fn();
+const mockMultiselect = vi.fn();
 const mockSelect = vi.fn();
 const mockText = vi.fn();
 
@@ -19,6 +21,14 @@ vi.mock("@clack/prompts", () => ({
 		return mockConfirm;
 	},
 	isCancel: (value: unknown) => value === cancel,
+	log: {
+		get error() {
+			return mockLogError;
+		},
+	},
+	get multiselect() {
+		return mockMultiselect;
+	},
 	get select() {
 		return mockSelect;
 	},
@@ -45,6 +55,17 @@ function createFlag(
 	return { key, kind, multiple: false, required: false, ...overrides };
 }
 
+function createThrowingSchema(error: unknown): ArgsSchema {
+	return {
+		"~standard": {
+			...z.string()["~standard"],
+			validate: () => {
+				throw error;
+			},
+		},
+	};
+}
+
 async function getValidator(flag: FlagDescriptor) {
 	mockText.mockResolvedValueOnce(cancel);
 
@@ -54,6 +75,18 @@ async function getValidator(flag: FlagDescriptor) {
 		text: string | undefined,
 	) => string | undefined;
 }
+
+beforeEach(() => {
+	for (const mock of [
+		mockConfirm,
+		mockLogError,
+		mockMultiselect,
+		mockSelect,
+		mockText,
+	]) {
+		mock.mockReset();
+	}
+});
 
 describe(promptForFlag, () => {
 	it("prompts with confirm when the flag is a boolean", async () => {
@@ -90,6 +123,64 @@ describe(promptForFlag, () => {
 		});
 	});
 
+	it("prompts with select when the flag is mixed with only choices", async () => {
+		mockSelect.mockResolvedValueOnce(1);
+
+		const result = await promptForFlag(
+			createFlag("value", "mixed", { choices: ["a", 1], types: [] }),
+			"Value?",
+		);
+
+		expect(result).toBe(1);
+		expect(mockText).not.toHaveBeenCalled();
+	});
+
+	it("prompts with multiselect when the flag is multiple with choices", async () => {
+		mockMultiselect.mockResolvedValueOnce(["author", "subscribed"]);
+
+		const result = await promptForFlag(
+			createFlag("reason", "string", {
+				choices: ["author", "subscribed"],
+				default: ["subscribed"],
+				multiple: true,
+			}),
+			"Reason?",
+		);
+
+		expect(result).toEqual(["author", "subscribed"]);
+		expect(mockMultiselect).toHaveBeenCalledWith({
+			initialValues: ["subscribed"],
+			message: "Reason?",
+			options: [
+				{ label: "author", value: "author" },
+				{ label: "subscribed", value: "subscribed" },
+			],
+			required: false,
+		});
+	});
+
+	it("requires a selection when the flag is required and multiple with choices", async () => {
+		mockMultiselect.mockResolvedValueOnce(["a"]);
+
+		await promptForFlag(
+			createFlag("letters", "string", {
+				choices: ["a", "b"],
+				multiple: true,
+				required: true,
+			}),
+			"Letters?",
+		);
+
+		expect(mockMultiselect).toHaveBeenCalledWith({
+			message: "Letters?",
+			options: [
+				{ label: "a", value: "a" },
+				{ label: "b", value: "b" },
+			],
+			required: true,
+		});
+	});
+
 	it("prompts with text when the flag is a multiple boolean", async () => {
 		mockText.mockResolvedValueOnce("[true]");
 
@@ -102,21 +193,6 @@ describe(promptForFlag, () => {
 		expect(mockConfirm).not.toHaveBeenCalled();
 	});
 
-	it("prompts with text and wraps the value in an array when the flag is multiple with choices", async () => {
-		mockText.mockResolvedValueOnce("author");
-
-		const result = await promptForFlag(
-			createFlag("reason", "string", {
-				choices: ["author", "subscribed"],
-				multiple: true,
-			}),
-			"Reason?",
-		);
-
-		expect(result).toEqual(["author"]);
-		expect(mockSelect).not.toHaveBeenCalled();
-	});
-
 	it("prompts with text and returns the string when the flag is a string", async () => {
 		mockText.mockResolvedValueOnce("Josh");
 
@@ -127,6 +203,21 @@ describe(promptForFlag, () => {
 			message: "Name?",
 			validate: expect.any(Function),
 		});
+	});
+
+	it("prompts with text when the flag is mixed with types", async () => {
+		mockText.mockResolvedValueOnce("5");
+
+		const result = await promptForFlag(
+			createFlag("concurrency", "mixed", {
+				choices: ["auto"],
+				types: ["number"],
+			}),
+			"Concurrency?",
+		);
+
+		expect(result).toBe(5);
+		expect(mockSelect).not.toHaveBeenCalled();
 	});
 
 	it("includes the default as a placeholder when the flag has one", async () => {
@@ -143,6 +234,46 @@ describe(promptForFlag, () => {
 			placeholder: "6",
 			validate: expect.any(Function),
 		});
+	});
+
+	it("includes a string default as-is as a placeholder when the flag has one", async () => {
+		mockText.mockResolvedValueOnce("");
+
+		await promptForFlag(
+			createFlag("name", "string", { default: "Josh" }),
+			"Name?",
+		);
+
+		expect(mockText).toHaveBeenCalledWith(
+			expect.objectContaining({ placeholder: "Josh" }),
+		);
+	});
+
+	it("includes a comma-separated default as a placeholder when the flag is multiple", async () => {
+		mockText.mockResolvedValueOnce("");
+
+		const result = await promptForFlag(
+			createFlag("tags", "string", { default: ["a", "b"], multiple: true }),
+			"Tags?",
+		);
+
+		expect(result).toEqual(["a", "b"]);
+		expect(mockText).toHaveBeenCalledWith(
+			expect.objectContaining({ placeholder: "a, b" }),
+		);
+	});
+
+	it("includes a JSON default as a placeholder when the flag is a multiple json flag", async () => {
+		mockText.mockResolvedValueOnce("");
+
+		await promptForFlag(
+			createFlag("labels", "json", { default: [{ a: 1 }], multiple: true }),
+			"Labels?",
+		);
+
+		expect(mockText).toHaveBeenCalledWith(
+			expect.objectContaining({ placeholder: '[{"a":1}]' }),
+		);
 	});
 
 	it("returns the default when nothing is entered and the flag has a default", async () => {
@@ -194,15 +325,26 @@ describe(promptForFlag, () => {
 		).toEqual([{ name: "a" }]);
 	});
 
-	it("wraps the value in an array when the flag is a multiple number flag", async () => {
-		mockText.mockResolvedValueOnce("3");
+	it("splits comma-separated text when the flag is a multiple string flag", async () => {
+		mockText.mockResolvedValueOnce(" a, b ,, c ");
+
+		expect(
+			await promptForFlag(
+				createFlag("tags", "string", { multiple: true }),
+				"Tags?",
+			),
+		).toEqual(["a", "b", "c"]);
+	});
+
+	it("splits and converts comma-separated text when the flag is a multiple number flag", async () => {
+		mockText.mockResolvedValueOnce("3, -4.5");
 
 		expect(
 			await promptForFlag(
 				createFlag("ids", "number", { multiple: true }),
 				"Ids?",
 			),
-		).toEqual([3]);
+		).toEqual([3, -4.5]);
 	});
 
 	it("returns the cancel symbol when the text prompt is cancelled", async () => {
@@ -219,6 +361,14 @@ describe(promptForFlag, () => {
 
 			expect(validate("")).toBe("Please enter a value.");
 			expect(validate(undefined)).toBe("Please enter a value.");
+		});
+
+		it("asks for a value when the text has only commas and the flag is multiple", async () => {
+			const validate = await getValidator(
+				createFlag("tags", "string", { multiple: true }),
+			);
+
+			expect(validate(" , ,")).toBe("Please enter a value.");
 		});
 
 		it("allows empty text when the flag has a default", async () => {
@@ -246,6 +396,15 @@ describe(promptForFlag, () => {
 			expect(validate("-1e3")).toBeUndefined();
 		});
 
+		it("asks for a number when any comma-separated value is not numeric and the flag is a multiple number flag", async () => {
+			const validate = await getValidator(
+				createFlag("ids", "integer", { multiple: true }),
+			);
+
+			expect(validate("1, x")).toBe("Please enter a numeric value.");
+			expect(validate("1, 2")).toBeUndefined();
+		});
+
 		it("asks for a number when the text is not numeric and the flag is an integer", async () => {
 			const validate = await getValidator(createFlag("count", "integer"));
 
@@ -258,6 +417,17 @@ describe(promptForFlag, () => {
 
 			expect(validate("{")).toBe("Please enter valid JSON.");
 			expect(validate("{}")).toBeUndefined();
+		});
+
+		it("reports the conversion error when a comma-separated value can't be converted", async () => {
+			const validate = await getValidator(
+				createFlag("bits", "boolean", { multiple: true }),
+			);
+
+			expect(validate("true, maybe")).toBe(
+				'Expected true or false, received "maybe".',
+			);
+			expect(validate("true, false")).toBeUndefined();
 		});
 
 		it("returns the schema's first issue message when the flag has a schema", async () => {
@@ -280,10 +450,30 @@ describe(promptForFlag, () => {
 				}),
 			);
 
-			expect(validate("a")).toBe(
+			expect(validate("ab, c")).toBe(
 				"Too small: expected string to have >=2 characters",
 			);
-			expect(validate("ab")).toBeUndefined();
+			expect(validate("ab, cd")).toBeUndefined();
+		});
+
+		it("returns the error message when the flag's schema throws an error", async () => {
+			const validate = await getValidator(
+				createFlag("name", "string", {
+					schema: createThrowingSchema(new Error("Oh no")),
+				}),
+			);
+
+			expect(validate("a")).toBe("Oh no");
+		});
+
+		it("returns the thrown value as a message when the flag's schema throws a non-error", async () => {
+			const validate = await getValidator(
+				createFlag("name", "string", {
+					schema: createThrowingSchema("Oh no"),
+				}),
+			);
+
+			expect(validate("a")).toBe("Oh no");
 		});
 
 		it("skips schema validation when the schema validates asynchronously", async () => {
@@ -347,6 +537,20 @@ describe(promptForOptions, () => {
 		expect(mockText).not.toHaveBeenCalled();
 	});
 
+	it("does not prompt for a hidden flag even when it is required", async () => {
+		const result = await promptForOptions({
+			flags: [
+				createFlag("secret", "string", { hidden: true, required: true }),
+				createFlag("debug", "boolean", { default: false, hidden: true }),
+			],
+			values: {},
+		});
+
+		expect(result).toEqual({ cancelled: false, completed: {}, prompted: {} });
+		expect(mockText).not.toHaveBeenCalled();
+		expect(mockConfirm).not.toHaveBeenCalled();
+	});
+
 	it("prompts for a flag when its value is undefined", async () => {
 		mockText.mockResolvedValueOnce("Josh");
 
@@ -359,6 +563,21 @@ describe(promptForOptions, () => {
 			cancelled: false,
 			completed: { name: "Josh" },
 			prompted: { name: "Josh" },
+		});
+	});
+
+	it("prompts for a flag named like an object property when it has no value", async () => {
+		mockText.mockResolvedValueOnce("x");
+
+		const result = await promptForOptions({
+			flags: [createFlag("constructor", "string", { required: true })],
+			values: {},
+		});
+
+		expect(result).toEqual({
+			cancelled: false,
+			completed: { constructor: "x" },
+			prompted: { constructor: "x" },
 		});
 	});
 
@@ -423,7 +642,7 @@ describe(promptForOptions, () => {
 		expect(result).toEqual({ cancelled: true, prompted: {} });
 	});
 
-	it("applies the flag's schema to prompted values when the flag has a schema", async () => {
+	it("stores prompted values as entered when the flag's schema transforms them", async () => {
 		mockText.mockResolvedValueOnce("").mockResolvedValueOnce("^a");
 
 		const result = await promptForOptions({
@@ -436,31 +655,115 @@ describe(promptForOptions, () => {
 
 		expect(result).toEqual({
 			cancelled: false,
+			completed: { bandwidth: 6, pattern: "^a" },
+			prompted: { bandwidth: 6, pattern: "^a" },
+		});
+	});
+
+	it("stores the schema's output when parse is enabled", async () => {
+		mockText.mockResolvedValueOnce("").mockResolvedValueOnce("^a");
+
+		const result = await promptForOptions({
+			flags: describeOptions({
+				bandwidth: z.number().default(6),
+				pattern: z.string().transform((value) => new RegExp(value)),
+			}),
+			parse: true,
+			values: {},
+		});
+
+		expect(result).toEqual({
+			cancelled: false,
 			completed: { bandwidth: 6, pattern: /^a/ },
 			prompted: { bandwidth: 6, pattern: /^a/ },
 		});
 	});
 
-	it("throws an error with the schema's issues when an async schema rejects the prompted value", async () => {
-		mockText.mockResolvedValueOnce("abc");
+	it("prompts again with the schema's issues when an async schema rejects the prompted value", async () => {
+		mockText.mockResolvedValueOnce("abc").mockResolvedValueOnce("12345");
 
-		await expect(
-			promptForOptions({
-				flags: [
-					createFlag("name", "string", {
-						required: true,
-						schema: createAsyncSchema(
-							z.string().min(5).regex(/^\d+$/, "Must be digits"),
-						),
-					}),
-				],
-				values: {},
-			}),
-		).rejects.toThrow(
-			new Error(
-				"--name: Too small: expected string to have >=5 characters; Must be digits",
-			),
+		const result = await promptForOptions({
+			flags: [
+				createFlag("code", "string", {
+					required: true,
+					schema: createAsyncSchema(
+						z.string().min(5).regex(/^\d+$/, "Must be digits"),
+					),
+				}),
+			],
+			values: {},
+		});
+
+		expect(result).toEqual({
+			cancelled: false,
+			completed: { code: "12345" },
+			prompted: { code: "12345" },
+		});
+		expect(mockLogError).toHaveBeenCalledWith(
+			"--code: Too small: expected string to have >=5 characters; Must be digits",
 		);
+		expect(mockText).toHaveBeenCalledTimes(2);
+	});
+
+	it("prompts again with the error message when the schema throws for the prompted value", async () => {
+		mockConfirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+		const result = await promptForOptions({
+			flags: [
+				createFlag("dryRun", "boolean", {
+					default: false,
+					schema: {
+						"~standard": {
+							...z.boolean()["~standard"],
+							validate: (value: unknown) => {
+								if (value === true) {
+									throw new Error("Not allowed");
+								}
+
+								return { value };
+							},
+						},
+					},
+				}),
+			],
+			values: {},
+		});
+
+		expect(result).toEqual({
+			cancelled: false,
+			completed: { dryRun: false },
+			prompted: { dryRun: false },
+		});
+		expect(mockLogError).toHaveBeenCalledWith("--dryRun: Not allowed");
+	});
+
+	it("prompts again with the thrown value when the schema throws a non-error for the prompted value", async () => {
+		mockSelect.mockResolvedValueOnce("b").mockResolvedValueOnce("a");
+
+		await promptForOptions({
+			flags: [
+				createFlag("letter", "string", {
+					choices: ["a", "b"],
+					required: true,
+					schema: {
+						"~standard": {
+							...z.string()["~standard"],
+							validate: (value: unknown) => {
+								if (value === "b") {
+									// eslint-disable-next-line @typescript-eslint/only-throw-error
+									throw "No b";
+								}
+
+								return { value };
+							},
+						},
+					},
+				}),
+			],
+			values: {},
+		});
+
+		expect(mockLogError).toHaveBeenCalledWith("--letter: No b");
 	});
 
 	it("prompts for an optional flag when its async schema rejects undefined", async () => {

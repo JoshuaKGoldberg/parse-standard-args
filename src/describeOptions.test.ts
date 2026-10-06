@@ -106,19 +106,125 @@ describe(describeOptions, () => {
 			]);
 		});
 
-		it("describes string choices when the property is a union of mixed literals", () => {
+		it("describes mixed choices when the property is a union of mixed literals", () => {
+			expect(
+				describeOptions(z.object({ mixed: z.literal(["a", 1, true]) })),
+			).toEqual([
+				{
+					choices: ["a", 1, true],
+					key: "mixed",
+					kind: "mixed",
+					multiple: false,
+					required: true,
+					types: [],
+				},
+			]);
+		});
+
+		it("describes mixed choices when the property is a union of non-primitive literals", () => {
+			expect(
+				describeOptions({
+					"~standard": {
+						jsonSchema: {
+							input: () => ({
+								properties: { value: { enum: ["a", null] } },
+								type: "object",
+							}),
+							output: vi.fn(),
+						},
+						validate: vi.fn(),
+						vendor: "test",
+						version: 1,
+					},
+				}),
+			).toEqual([
+				{
+					choices: ["a", null],
+					key: "value",
+					kind: "mixed",
+					multiple: false,
+					required: false,
+					types: [],
+				},
+			]);
+		});
+
+		it("describes a mixed flag when the property is a union of a literal and a number", () => {
 			expect(
 				describeOptions(
-					z.object({ mixed: z.union([z.literal("a"), z.literal(1)]) }),
+					z.object({ concurrency: z.union([z.literal("auto"), z.number()]) }),
 				),
 			).toEqual([
 				{
-					choices: ["a", 1],
-					key: "mixed",
-					kind: "string",
+					choices: ["auto"],
+					key: "concurrency",
+					kind: "mixed",
 					multiple: false,
 					required: true,
+					types: ["number"],
 				},
+			]);
+		});
+
+		it("describes a mixed flag when the property is a union of numbers and booleans", () => {
+			expect(
+				describeOptions(
+					z.object({ value: z.union([z.number(), z.int(), z.boolean()]) }),
+				),
+			).toEqual([
+				{
+					key: "value",
+					kind: "mixed",
+					multiple: false,
+					required: true,
+					types: ["number", "boolean"],
+				},
+			]);
+		});
+
+		it("describes a multiple mixed flag when the property is an array of a union", () => {
+			expect(
+				describeOptions(
+					z.object({ values: z.array(z.union([z.string(), z.number()])) }),
+				),
+			).toEqual([
+				{
+					key: "values",
+					kind: "mixed",
+					multiple: true,
+					required: true,
+					types: ["string", "number"],
+				},
+			]);
+		});
+
+		it("describes the type without choices when the property is a union of a literal and its type", () => {
+			expect(
+				describeOptions(
+					z.object({
+						name: z.union([z.literal("me"), z.string()]),
+						size: z.union([z.literal(1), z.int()]),
+						value: z.union([z.literal(1.5), z.int()]),
+					}),
+				),
+			).toEqual([
+				{ key: "name", kind: "string", multiple: false, required: true },
+				{ key: "size", kind: "integer", multiple: false, required: true },
+				{ key: "value", kind: "number", multiple: false, required: true },
+			]);
+		});
+
+		it("describes a string flag when the property is a union including a non-primitive", () => {
+			expect(
+				describeOptions(
+					z.object({
+						value: z.union([z.string(), z.array(z.string())]),
+						withLiteral: z.union([z.literal("a"), z.object({})]),
+					}),
+				),
+			).toEqual([
+				{ key: "value", kind: "string", multiple: false, required: true },
+				{ key: "withLiteral", kind: "string", multiple: false, required: true },
 			]);
 		});
 
@@ -273,11 +379,17 @@ describe(describeOptions, () => {
 			]);
 		});
 
-		it("describes a string flag when the property is a union of strings and numbers", () => {
+		it("describes a mixed flag when the property is a union of strings and numbers", () => {
 			expect(
 				describeOptions(z.object({ value: z.union([z.string(), z.number()]) })),
 			).toEqual([
-				{ key: "value", kind: "string", multiple: false, required: true },
+				{
+					key: "value",
+					kind: "mixed",
+					multiple: false,
+					required: true,
+					types: ["string", "number"],
+				},
 			]);
 		});
 
@@ -409,6 +521,83 @@ describe(describeOptions, () => {
 			},
 		});
 
+		it("decodes JSON Pointer escapes when resolving references", () => {
+			expect(
+				describeOptions(
+					createSchema({
+						$defs: {
+							"a b": { type: "boolean" },
+							"a~b": { enum: ["x", "y"] },
+							"ns/num": { description: "Slashed", type: "number" },
+						},
+						properties: {
+							escaped: { $ref: "#/$defs/a~0b" },
+							slashed: { $ref: "#/$defs/ns~1num" },
+							spaced: { $ref: "#/$defs/a%20b" },
+							unencoded: { $ref: "#/$defs/%E0%A4%A" },
+						},
+						type: "object",
+					}),
+				),
+			).toEqual([
+				{
+					choices: ["x", "y"],
+					key: "escaped",
+					kind: "string",
+					multiple: false,
+					required: false,
+				},
+				{
+					description: "Slashed",
+					key: "slashed",
+					kind: "number",
+					multiple: false,
+					required: false,
+				},
+				{ key: "spaced", kind: "boolean", multiple: false, required: false },
+				{ key: "unencoded", kind: "string", multiple: false, required: false },
+			]);
+		});
+
+		it("resolves a reference to the root schema", () => {
+			expect(
+				describeOptions(
+					createSchema({
+						properties: { name: { type: "string" } },
+						type: "object",
+					}),
+				),
+			).toHaveLength(1);
+			expect(
+				describeOptions(
+					createSchema({
+						properties: { self: { $ref: "#" } },
+						type: "object",
+					}),
+				),
+			).toEqual([
+				{ key: "self", kind: "json", multiple: false, required: false },
+			]);
+		});
+
+		it("resolves a Zod schema whose id contains a slash", () => {
+			expect(
+				describeOptions(
+					z.object({
+						count: z.number().meta({ description: "Count", id: "ns/count" }),
+					}),
+				),
+			).toEqual([
+				{
+					description: "Count",
+					key: "count",
+					kind: "number",
+					multiple: false,
+					required: true,
+				},
+			]);
+		});
+
 		it("resolves a root reference to its object definition", () => {
 			expect(
 				describeOptions(
@@ -490,7 +679,13 @@ describe(describeOptions, () => {
 					}),
 				),
 			).toEqual([
-				{ key: "either", kind: "string", multiple: false, required: false },
+				{
+					key: "either",
+					kind: "mixed",
+					multiple: false,
+					required: false,
+					types: ["number", "string"],
+				},
 				{ key: "maybe", kind: "integer", multiple: false, required: false },
 				{ key: "nothing", kind: "string", multiple: false, required: false },
 			]);
@@ -682,6 +877,151 @@ describe(describeOptions, () => {
 		});
 	});
 
+	describe("with schema defaults missing from the input JSON Schema", () => {
+		it("reads defaults from the ArkType JSON Schema when the schema is from ArkType", () => {
+			expect(
+				describeOptions(
+					type({
+						color: ["boolean", "=", true],
+						count: ["number", "=", 5],
+						"name?": "string",
+					}),
+				),
+			).toEqual([
+				{
+					default: true,
+					key: "color",
+					kind: "boolean",
+					multiple: false,
+					required: false,
+				},
+				{
+					default: 5,
+					key: "count",
+					kind: "number",
+					multiple: false,
+					required: false,
+				},
+				{ key: "name", kind: "string", multiple: false, required: false },
+			]);
+		});
+
+		it("reads defaults from the output JSON Schema when the input lacks them", () => {
+			const createSchema = (output: () => Record<string, unknown>) => ({
+				"~standard": {
+					jsonSchema: {
+						input: () => ({
+							properties: { count: { type: "number" } },
+							required: ["count"],
+							type: "object",
+						}),
+						output,
+					},
+					validate: vi.fn(),
+					vendor: "test",
+					version: 1 as const,
+				},
+			});
+
+			expect(
+				describeOptions(
+					createSchema(() => ({
+						properties: { count: { default: 3, type: "number" } },
+						type: "object",
+					})),
+				),
+			).toEqual([
+				{
+					default: 3,
+					key: "count",
+					kind: "number",
+					multiple: false,
+					required: false,
+				},
+			]);
+			expect(describeOptions(createSchema(() => ({ type: "string" })))).toEqual(
+				[{ key: "count", kind: "number", multiple: false, required: true }],
+			);
+		});
+
+		it("reads a default from the output JSON Schema when a record schema's input lacks it", () => {
+			const schema = {
+				"~standard": {
+					jsonSchema: {
+						input: () => ({ type: "number" }),
+						output: () => ({ default: 3, type: "number" }),
+					},
+					validate: () => ({ value: 3 }),
+					vendor: "test",
+					version: 1 as const,
+				},
+			};
+
+			expect(describeOptions({ count: schema })).toEqual([
+				{
+					default: 3,
+					key: "count",
+					kind: "number",
+					multiple: false,
+					required: false,
+					schema,
+				},
+			]);
+		});
+	});
+
+	it.each([
+		["a string", z.string()],
+		[
+			"a union of objects",
+			z.union([z.object({ a: z.string() }), z.object({ b: z.string() })]),
+		],
+		["an array", z.array(z.string())],
+	])("throws a helpful TypeError when the schema is %s", (_, schema) => {
+		expect(() => describeOptions(schema)).toThrow(
+			new TypeError(
+				"Options schemas must describe an object of flags, such as z.object({ ... }), but the schema from zod doesn't. Unions, intersections, and other non-object schemas aren't supported.",
+			),
+		);
+	});
+
+	it("describes flags when the schema is an object without an explicit type", () => {
+		expect(
+			describeOptions({
+				"~standard": {
+					jsonSchema: {
+						input: () => ({ properties: { name: { type: "string" } } }),
+						output: vi.fn(),
+					},
+					validate: vi.fn(),
+					vendor: "test",
+					version: 1,
+				},
+			}),
+		).toEqual([
+			{ key: "name", kind: "string", multiple: false, required: false },
+		]);
+	});
+
+	it("throws a helpful TypeError when the schema is an intersection without an explicit type", () => {
+		expect(() =>
+			describeOptions({
+				"~standard": {
+					jsonSchema: {
+						input: () => ({
+							allOf: [{ type: "object" }],
+							properties: { name: { type: "string" } },
+						}),
+						output: vi.fn(),
+					},
+					validate: vi.fn(),
+					vendor: "test",
+					version: 1,
+				},
+			}),
+		).toThrow(TypeError);
+	});
+
 	it("throws a helpful TypeError when the schema does not implement Standard JSON Schema", () => {
 		const schema = {
 			"~standard": { validate: vi.fn(), vendor: "legacy", version: 1 },
@@ -731,6 +1071,20 @@ describe(describePositionals, () => {
 		expect(
 			describePositionals(z.tuple([z.number().int(), z.string()], z.boolean())),
 		).toMatchObject({ kinds: ["integer", "string"], rest: "boolean" });
+	});
+
+	it("describes mixed kinds as value descriptions when the schema has mixed items", () => {
+		expect(
+			describePositionals(
+				z.tuple(
+					[z.union([z.literal("auto"), z.number()])],
+					z.union([z.number(), z.boolean()]),
+				),
+			),
+		).toMatchObject({
+			kinds: [{ choices: ["auto"], kind: "mixed", types: ["number"] }],
+			rest: { kind: "mixed", types: ["number", "boolean"] },
+		});
 	});
 
 	it("includes the description and placeholder when the schema has metadata", () => {

@@ -324,6 +324,26 @@ describe(formatFlagUsage, () => {
 	});
 });
 
+describe(formatFlagUsage, () => {
+	it("lists the choices and types as the value name when the flag is mixed", () => {
+		expect(
+			formatFlagUsage(
+				createFlag("concurrency", "mixed", {
+					choices: ["auto"],
+					types: ["number"],
+				}),
+				false,
+			),
+		).toBe("--concurrency <auto|number>");
+		expect(
+			formatFlagUsage(
+				createFlag("value", "mixed", { types: ["number", "boolean"] }),
+				false,
+			),
+		).toBe("--value <number|boolean>");
+	});
+});
+
 describe(formatFlagDescription, () => {
 	it("returns an empty string when the flag has no description or details", () => {
 		expect(formatFlagDescription(createFlag("name", "string"))).toBe("");
@@ -358,6 +378,12 @@ describe(formatFlagDescription, () => {
 		expect(
 			formatFlagDescription(createFlag("name", "string", { default: "Josh" })),
 		).toBe("(default: Josh)");
+	});
+
+	it("includes an empty string default as quotes when the flag has one", () => {
+		expect(
+			formatFlagDescription(createFlag("prefix", "string", { default: "" })),
+		).toBe('(default: "")');
 	});
 
 	it("includes a non-string default as JSON when the flag has one", () => {
@@ -441,6 +467,30 @@ describe(formatFlagType, () => {
 		expect(
 			formatFlagType(createFlag("tags", "string", { multiple: true })),
 		).toBe("string[]");
+	});
+
+	it("returns a union of choices and types when the flag is mixed", () => {
+		expect(
+			formatFlagType(
+				createFlag("concurrency", "mixed", {
+					choices: ["auto"],
+					types: ["number"],
+				}),
+			),
+		).toBe('"auto" | number');
+		expect(
+			formatFlagType(
+				createFlag("values", "mixed", {
+					multiple: true,
+					types: ["number", "boolean"],
+				}),
+			),
+		).toBe("(number | boolean)[]");
+		expect(
+			formatFlagType(
+				createFlag("values", "mixed", { choices: ["a", 1], types: [] }),
+			),
+		).toBe('"a" | 1');
 	});
 
 	it("returns a union of choices when the flag has choices", () => {

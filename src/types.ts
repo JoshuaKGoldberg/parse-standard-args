@@ -50,8 +50,15 @@ export type ArgsIssueKind =
 
 /**
  * How a flag's raw string values are converted before validation.
+ * "mixed" values may be any of several types, such as `"auto" | number`.
  */
-export type FlagKind = "boolean" | "integer" | "json" | "number" | "string";
+export type FlagKind =
+	"boolean" | "integer" | "json" | "mixed" | "number" | "string";
+
+/**
+ * A primitive type a "mixed" flag's values may be converted to.
+ */
+export type FlagValueType = "boolean" | "integer" | "number" | "string";
 
 /**
  * Everything known about a single flag, derived from its schema.
@@ -59,6 +66,7 @@ export type FlagKind = "boolean" | "integer" | "json" | "number" | "string";
 export interface FlagDescriptor {
 	/**
 	 * Allowed values, if the schema is an enum or union of literals.
+	 * For "mixed" flags, values of any of its `types` are allowed too.
 	 */
 	choices?: readonly unknown[];
 
@@ -116,7 +124,20 @@ export interface FlagDescriptor {
 	 * Single-character alias, from `.meta({ short })`.
 	 */
 	short?: string;
+
+	/**
+	 * For "mixed" flags, primitive types (other than `choices`) values may be.
+	 */
+	types?: readonly FlagValueType[];
 }
+
+/**
+ * How to convert a value, without a flag's other metadata.
+ */
+export type ValueDescription = Pick<
+	FlagDescriptor,
+	"choices" | "kind" | "types"
+>;
 
 /**
  * CLI options: either one object schema, or a record of per-flag schemas.
@@ -134,11 +155,33 @@ export type OptionsShape = Record<string, ArgsSchema>;
 export type InferOptions<Options extends OptionsDefinition> =
 	Options extends ArgsSchema
 		? StandardSchemaV1.InferOutput<Options>
-		: {
-				[Key in keyof Options]: Options[Key] extends ArgsSchema
-					? StandardSchemaV1.InferOutput<Options[Key]>
-					: never;
-			};
+		: InferOptionsShape<Options>;
+
+/**
+ * The validated values produced by a record of per-flag schemas.
+ * Flags whose output may be undefined are optional.
+ */
+type InferOptionsShape<Options> = Simplify<
+	{
+		[
+			Key in keyof Options as undefined extends InferShapeOutput<Options[Key]>
+				? Key
+				: never
+		]?: InferShapeOutput<Options[Key]>;
+	} & {
+		[
+			Key in keyof Options as undefined extends InferShapeOutput<Options[Key]>
+				? never
+				: Key
+		]: InferShapeOutput<Options[Key]>;
+	}
+>;
+
+type InferShapeOutput<Schema> = Schema extends ArgsSchema
+	? StandardSchemaV1.InferOutput<Schema>
+	: never;
+
+type Simplify<Value> = { [Key in keyof Value]: Value[Key] } & {};
 
 /**
  * The validated values produced by an optional positionals schema.

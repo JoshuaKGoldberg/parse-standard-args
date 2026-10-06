@@ -147,19 +147,21 @@ export function formatFlagUsage(flag: FlagDescriptor, alignShort = true) {
  * @returns The flag's type name.
  */
 export function formatFlagType(flag: FlagDescriptor) {
-	const base = flag.choices
-		? flag.choices.map((choice) => JSON.stringify(choice)).join(" | ")
-		: flag.kind;
+	const parts = [
+		...(flag.choices?.map((choice) => JSON.stringify(choice)) ?? []),
+		...(flag.types ?? (flag.choices ? [] : [flag.kind])),
+	];
+	const base = parts.join(" | ");
 
 	if (!flag.multiple) {
 		return base;
 	}
 
-	return flag.choices && flag.choices.length > 1 ? `(${base})[]` : `${base}[]`;
+	return parts.length > 1 ? `(${base})[]` : `${base}[]`;
 }
 
 function formatValue(value: unknown) {
-	return typeof value === "string" ? value : JSON.stringify(value);
+	return typeof value === "string" && value ? value : JSON.stringify(value);
 }
 
 function formatValueName(flag: FlagDescriptor) {
@@ -167,8 +169,11 @@ function formatValueName(flag: FlagDescriptor) {
 		return flag.placeholder;
 	}
 
-	if (flag.choices) {
-		return flag.choices.map(formatValue).join("|");
+	if (flag.choices || flag.types) {
+		return [
+			...(flag.choices?.map(formatValue) ?? []),
+			...(flag.types ?? []),
+		].join("|");
 	}
 
 	return flag.kind;

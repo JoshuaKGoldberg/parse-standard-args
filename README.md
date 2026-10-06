@@ -77,29 +77,37 @@ Examples:
 ```
 
 Errors set `process.exitCode` to `1` (configurable with `run(args, { exitCode })`), and nothing ever prints a stack trace.
-Unknown flags get "did you mean" suggestions for likely typos and abbreviations, such as `--repo` for `--repository`.
+Unknown flags get "did you mean" suggestions for likely typos and abbreviations, such as `--repo` for `--repository`, or `--l` for the flag whose short alias is `-l`.
+Hidden flags are never suggested.
 
 ### Flags
 
 Each property of the options schema is a flag, named exactly as its key: `createdBy` is `--createdBy`, and `"dry-run"` is `--dry-run`.
 How each flag is parsed comes from its schema's JSON Schema:
 
-| Schema type              | Command-line                          | Value                     |
-| ------------------------ | ------------------------------------- | ------------------------- |
-| `boolean`                | `--flag`, `--flag false`, `--no-flag` | `true` / `false`          |
-| `number` / `integer`     | `--flag 12`                           | `12`                      |
-| `string`                 | `--flag value`                        | `"value"`                 |
-| enum / literals          | `--flag a`                            | `"a"` (shown as `<a\|b>`) |
-| `array`                  | `--flag a --flag b`                   | `["a", "b"]`              |
-| `object`, arrays of them | `--flag '{"a":1}'`                    | parsed JSON               |
+| Schema type                        | Command-line                          | Value                     |
+| ---------------------------------- | ------------------------------------- | ------------------------- |
+| `boolean`                          | `--flag`, `--flag false`, `--no-flag` | `true` / `false`          |
+| `number` / `integer`               | `--flag 12`                           | `12`                      |
+| `string`                           | `--flag value`                        | `"value"`                 |
+| enum / literals                    | `--flag a`                            | `"a"` (shown as `<a\|b>`) |
+| `array`                            | `--flag a --flag b`                   | `["a", "b"]`              |
+| `object`, arrays of them           | `--flag '{"a":1}'`                    | parsed JSON               |
+| unions, such as `"auto" \| number` | `--flag auto`, `--flag 4`             | `"auto"`, `4`             |
 
 Numbers are converted before validation, so schemas can use plain `z.number()` rather than `z.coerce.number()`.
 Strings that aren't numbers, such as `""`, `"abc"`, or `"0x10"`, are reported instead of becoming `NaN` or `0`.
 Enum values are checked against their choices, as in `--reporter: Expected "json" or "text", received "nope".`
+Unions of different types, such as `z.union([z.literal("auto"), z.number()])` or `z.literal(["a", 1, true])`, convert each value to the first match of: a literal whose text it is, a number (if numbers are allowed), `true` or `false` (if booleans are allowed), or else the string as-is.
+Unions that allow booleans may also be given without a value, as in `--color` for `true`.
 
-A flag that requires a value reports an error if it's followed by another flag, as in `--owner --help`, rather than taking `--help` as its value.
-Values that start with `-` can be passed inline, as in `--owner=-weird`.
-Negative numbers can be passed either way, as in `--offset -5`.
+A flag that requires a value reports an error if it's followed by another flag, as in `--owner --verbose`, rather than taking `--verbose` as its value.
+A following arg starting with `--` is always treated as a flag; one starting with a single `-` is only treated as a flag if it's made of known short flags, so values such as `--words -dashy` and `--offset -5` work.
+Any value can be passed inline, as in `--owner=--weird`.
+Short flags can take inline values too, as in `-f=value` or `-q=false`.
+
+An unknown short flag group is reported once, as in `Unknown flag: -w (in -weird.js)`.
+When positionals are allowed, args starting with `-` can be passed as positionals after a `--` terminator, as in `format -- -weird.js`, and negative numbers are positionals when the next positional is numeric, as in `offset -5`.
 
 > Errors thrown by schema transforms, such as `new RegExp(value)` on an invalid pattern, are reported without a stack trace, but can't be attributed to their flag.
 > Prefer reporting issues instead, such as with Zod's `ctx.addIssue`, so the error names the flag.
@@ -115,9 +123,13 @@ Metadata for help text and parsing comes from `.describe()` and `.meta()` (or yo
 | `placeholder`        | Name for the flag's value in `--help`, as in `<regex>` |
 | `short`              | Single-character alias, as in `-l`                     |
 
+`createCli` throws a `TypeError` if a short alias isn't exactly one character, or if two flags (including the built-in `--help` and `--version`) share one.
+It also throws if the options schema isn't an object, such as a union of objects, or can't be converted to JSON Schema.
+
 ### Positionals
 
 Positional arguments are only allowed if you provide a `positionals` schema for their array.
+Args after a `--` terminator are always positionals; `terminatorIndex` in parse results says how many positionals came before it.
 Its `placeholder`, `description`, `minItems`, and `maxItems` are used in help text, as in `<patterns...>` or `[globs...]`:
 
 ```ts
@@ -130,24 +142,29 @@ const cli = createCli({
 
 ### `createCli` Settings
 
-| Setting            | Type                                            | Description                                                                                                               |
-| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `description`      | `string`                                        | Sentence(s) describing what the CLI does, for help text.                                                                  |
-| `examples`         | `string[]`                                      | Example commands, printed as-is in help text.                                                                             |
-| `footer`           | `string`                                        | Text printed at the end of help text, such as a link to docs.                                                             |
-| `help`             | `boolean` or `{ description?, short? }`         | Whether to add `--help`, with `-h` if no option uses it (default: `true`).                                                |
-| `name`             | `string`                                        | Name of the CLI, as typed to run it. **Required.**                                                                        |
-| `options`          | schema or `Record<string, schema>`              | Either one object schema, or a record of per-flag schemas. **Required.**                                                  |
-| `positionals`      | schema                                          | Schema for the array of positionals; if omitted, none are allowed.                                                        |
-| `positionalsUsage` | `string`                                        | Usage text for positionals in help (default: from the schema's `placeholder`).                                            |
-| `strict`           | `boolean` or `"warn"`                           | Whether unknown flags and unexpected positionals are errors (default: `true`); `"warn"` ignores them but prints warnings. |
-| `usage`            | `string`                                        | Usage text after the name in help, such as `[--dry-run] <patterns...>`.                                                   |
-| `version`          | `string` or `{ version, description?, short? }` | Version to print for `--version`, with `-v` if no option uses it.                                                         |
+| Setting            | Type                                    | Description                                                                                                               |
+| ------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `description`      | `string`                                | Sentence(s) describing what the CLI does, for help text.                                                                  |
+| `examples`         | `string[]`                              | Example commands, printed as-is in help text.                                                                             |
+| `footer`           | `string`                                | Text printed at the end of help text, such as a link to docs.                                                             |
+| `help`             | `boolean` or `{ description?, short? }` | Whether to add `--help`, with `-h` if no option uses it (default: `true`).                                                |
+| `name`             | `string`                                | Name of the CLI, as typed to run it. **Required.**                                                                        |
+| `options`          | schema or `Record<string, schema>`      | Either one object schema, or a record of per-flag schemas. **Required.**                                                  |
+| `positionals`      | schema                                  | Schema for the array of positionals; if omitted, none are allowed.                                                        |
+| `positionalsUsage` | `string`                                | Usage text for positionals in help (default: from the schema's `placeholder`).                                            |
+| `strict`           | `boolean` or `"warn"`                   | Whether unknown flags and unexpected positionals are errors (default: `true`); `"warn"` ignores them but prints warnings. |
+
+With `strict: false` or `"warn"`, unknown flags are collected into `unknown`.
+If no `positionals` schema is given, an unknown flag takes the next arg as its value (unless it looks like a flag), as in `--old-flag value` for `{ "old-flag": "value" }`.
+If positionals are allowed, there's no way to tell whether that arg was meant as the unknown flag's value or as a positional, so it's a positional.
+| `usage` | `string` | Usage text after the name in help, such as `[--dry-run] <patterns...>`. |
+| `version` | `string` or `{ version, description?, short? }` | Version to print for `--version`, with `-v` if no option uses it. |
 
 `createCli` returns:
 
-- `run(args, { error?, exitCode?, log?, warn? })`: parses args, printing help, version, warnings, or errors; returns `{ positionals, values, warnings }` or `undefined` if the CLI shouldn't continue.
+- `run(args, { error?, exitCode?, log?, warn? })`: parses args, printing help, version, warnings, or errors; returns `{ positionals, terminatorIndex?, unknown, values, warnings }` or `undefined` if the CLI shouldn't continue.
 - `parse(args)`: parses args without printing, returning a result whose `type` is `"error"`, `"help"`, `"values"`, or `"version"` (with the `text` to print, if any).
+  Both `"error"` and `"values"` results include `warnings`.
 - `formatHelp()`: returns the help text.
 - `flags`: descriptors of each flag, for building your own help or prompts.
 
@@ -162,6 +179,7 @@ For CLIs that need more control, such as prompting for missing values before val
 - `formatIssues(issues)` and `getClosestFlag(flag, knownFlags)`: friendly errors and "did you mean" suggestions
 
 Each issue has a `message` ready to print, the `flag` it's for (if any), and a `kind` for styling or handling it yourself: `"invalid"`, `"missing"`, `"unexpected"`, `"unknown"`, or `"validation"`.
+A flag is reported as `--flag is required.` (`"missing"`) only if it wasn't provided and the schema rejects it being missing, so schemas that fill in missing values, such as with `z.preprocess`, work as expected.
 
 ### Prompts
 
@@ -181,7 +199,15 @@ if (!result.cancelled) {
 }
 ```
 
-Booleans are prompted with a confirm, enums and literals with a select, and everything else with text input validated against the flag's schema.
+Visible flags are prompted for if they're required or have a default to confirm; hidden flags never are.
+Booleans are prompted with a confirm, enums and literals with a select (or a multiselect for repeatable flags), and everything else with text input.
+Repeatable flags accept comma-separated text, as in `a, b`.
+
+`completed` and `prompted` hold values as entered, ready to be validated with `validateOptions` like parsed args.
+Pass `parse: true` to store each flag's schema output, such as transformed values, instead.
+
+Flags from a record of per-flag schemas are validated as they're entered, and prompted again if their schema rejects the value.
+Flags from one object schema can't be validated individually, so validate `completed` afterwards.
 
 ### TypeScript
 
@@ -191,6 +217,7 @@ If you export a type derived from the schema under [`isolatedDeclarations`](http
 ### Other Schema Libraries
 
 Any library implementing both Standard Schema and Standard JSON Schema works.
+Constraints that JSON Schema can't express, such as Valibot's `v.check()` or ArkType's `.narrow()` and `Date`, are described by their base types.
 For [Valibot](https://valibot.dev), wrap schemas with [`toStandardJsonSchema`](https://www.npmjs.com/package/@valibot/to-json-schema):
 
 ```ts

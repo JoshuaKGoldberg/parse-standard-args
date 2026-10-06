@@ -33,6 +33,11 @@ export interface CliParseError {
 	issues: ArgsIssue[];
 	text: string;
 	type: "error";
+
+	/**
+	 * Unknown flags and unexpected positionals, when strict is "warn".
+	 */
+	warnings: ArgsIssue[];
 }
 
 export interface CliParseHelp {
@@ -48,6 +53,12 @@ export type CliParseResult<Values, Positionals> =
 
 export interface CliParseValues<Values, Positionals> {
 	positionals: Positionals;
+
+	/**
+	 * How many positionals came before a `--` terminator, if there was one.
+	 */
+	terminatorIndex?: number;
+
 	type: "values";
 	unknown: Record<string, boolean | string>;
 	values: Values;
@@ -179,6 +190,9 @@ export function createCli<
 	const optionFlags = describeOptions(options);
 	const builtinFlags = createBuiltinFlags(optionFlags, help, version);
 	const flags = [...optionFlags, ...builtinFlags];
+	const hasHelpFlag = builtinFlags.some((flag) => flag.key === "help");
+
+	assertValidShorts(flags);
 	const positionalsDescription =
 		positionals && describePositionals(positionals);
 	const positionalKinds: PositionalKinds | undefined =
@@ -219,7 +233,10 @@ export function createCli<
 			...(positionalKinds && { positionals: positionalKinds }),
 			...(settings.strict !== undefined && { strict: settings.strict }),
 		});
-		const optionValues = { ...raw.values };
+		const optionValues = Object.assign(
+			Object.create(null) as Record<string, unknown>,
+			raw.values,
+		);
 
 		for (const builtin of builtinFlags) {
 			if (!optionValues[builtin.key]) {
@@ -236,22 +253,40 @@ export function createCli<
 			delete optionValues[builtin.key];
 		}
 
+		// Positionals that failed to convert would make validation issues confusing.
+		const positionalsConverted = !raw.issues.some(
+			(issue) => issue.kind === "invalid" && !issue.flag,
+		);
+
 		const [validatedOptions, validatedPositionals] = await Promise.all([
 			validateOptions<Values>(options, optionValues),
-			positionals
+			positionals && positionalsConverted
 				? validatePositionals<PositionalValues>(positionals, raw.positionals)
 				: ({ value: raw.positionals } as ValidationResult<PositionalValues>),
 		]);
-		const parseIssues = [
-			...raw.issues,
-			...getMissingFlagIssues(optionFlags, optionValues, raw.issues),
-		];
+		const validationIssues = validatedOptions.issues ?? [];
+		const parsedFlags = new Set(raw.issues.map((issue) => issue.flag));
+
+		// Flags that weren't provided and that the schema rejects as missing are required.
+		const missingFlags = optionFlags
+			.map((flag) => flag.key)
+			.filter(
+				(key) =>
+					!Object.hasOwn(optionValues, key) &&
+					!parsedFlags.has(key) &&
+					validationIssues.some((issue) => issue.flag === key),
+			);
 
 		// Each flag should only be reported once, with its most specific issue.
-		const reportedFlags = new Set(parseIssues.map((issue) => issue.flag));
+		const reportedFlags = new Set([...parsedFlags, ...missingFlags]);
 		const issues = [
-			...parseIssues,
-			...(validatedOptions.issues ?? []).filter(
+			...raw.issues,
+			...missingFlags.map((key): ArgsIssue => ({
+				flag: key,
+				kind: "missing",
+				message: `--${key} is required.`,
+			})),
+			...validationIssues.filter(
 				(issue) => !issue.flag || !reportedFlags.has(issue.flag),
 			),
 			...(validatedPositionals.issues ?? []),
@@ -260,15 +295,22 @@ export function createCli<
 		if (issues.length) {
 			return {
 				issues,
-				text: [formatIssues(issues), help && `Run '${name} --help' for usage.`]
+				text: [
+					formatIssues(issues),
+					hasHelpFlag && `Run '${name} --help' for usage.`,
+				]
 					.filter(Boolean)
 					.join("\n"),
 				type: "error",
+				warnings: raw.warnings,
 			};
 		}
 
 		return {
 			positionals: validatedPositionals.value as PositionalValues,
+			...(raw.terminatorIndex !== undefined && {
+				terminatorIndex: raw.terminatorIndex,
+			}),
 			type: "values",
 			unknown: raw.unknown,
 			values: validatedOptions.value as Values,
@@ -301,6 +343,10 @@ export function createCli<
 
 		switch (result.type) {
 			case "error":
+				if (result.warnings.length) {
+					warn(formatIssues(result.warnings));
+				}
+
 				error(result.text);
 				process.exitCode = exitCode;
 				return undefined;
@@ -320,6 +366,32 @@ export function createCli<
 	}
 
 	return { flags, formatHelp: getHelpText, parse, run };
+}
+
+function assertValidShorts(flags: FlagDescriptor[]) {
+	const keysByShort = new Map<string, string>();
+
+	for (const { key, short } of flags) {
+		if (short === undefined) {
+			continue;
+		}
+
+		if (short.length !== 1) {
+			throw new TypeError(
+				`--${key}'s short alias must be a single character, but it's "${short}".`,
+			);
+		}
+
+		const existing = keysByShort.get(short);
+
+		if (existing) {
+			throw new TypeError(
+				`--${existing} and --${key} can't both use the short alias -${short}.`,
+			);
+		}
+
+		keysByShort.set(short, key);
+	}
 }
 
 function createBuiltinFlags(
@@ -384,23 +456,4 @@ function formatPositionalsUsage({
 	const repeated = maxItems === 1 ? placeholder : `${placeholder}...`;
 
 	return minItems ? `<${repeated}>` : `[${repeated}]`;
-}
-
-function getMissingFlagIssues(
-	flags: FlagDescriptor[],
-	values: Record<string, unknown>,
-	issues: ArgsIssue[],
-): ArgsIssue[] {
-	return flags
-		.filter(
-			(flag) =>
-				flag.required &&
-				!(flag.key in values) &&
-				!issues.some((issue) => issue.flag === flag.key),
-		)
-		.map((flag) => ({
-			flag: flag.key,
-			kind: "missing",
-			message: `--${flag.key} is required.`,
-		}));
 }

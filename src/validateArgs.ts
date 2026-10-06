@@ -8,6 +8,11 @@ export type ValidationResult<Value> =
 	| { issues: ArgsIssue[]; value?: undefined }
 	| { issues?: undefined; value: Value };
 
+interface IssueTarget {
+	key?: string;
+	label: string;
+}
+
 /**
  * Validates parsed flag values against an options definition.
  * Schema issues are reported against their flag, as in `--flag: message`.
@@ -15,11 +20,6 @@ export type ValidationResult<Value> =
  * @param values Parsed (but not yet validated) flag values.
  * @returns Either the validated values or issues explaining why they're invalid.
  */
-interface IssueTarget {
-	key?: string;
-	label: string;
-}
-
 export async function validateOptions<Value>(
 	options: OptionsDefinition,
 	values: Record<string, unknown>,
@@ -37,17 +37,22 @@ export async function validateOptions<Value>(
 	}
 
 	const issues: ArgsIssue[] = [];
-	const validated: Record<string, unknown> = {};
+	const validated = Object.create(null) as Record<string, unknown>;
 
 	for (const [key, schema] of Object.entries(options)) {
-		const result = await validateSchema(schema, values[key], (path) => ({
-			key,
-			label: formatFlagPath(key, path),
-		}));
+		const provided = Object.hasOwn(values, key);
+		const result = await validateSchema(
+			schema,
+			provided ? values[key] : undefined,
+			(path) => ({
+				key,
+				label: formatFlagPath(key, path),
+			}),
+		);
 
 		if (result.issues) {
 			issues.push(...result.issues);
-		} else if (result.value !== undefined || key in values) {
+		} else if (result.value !== undefined || provided) {
 			validated[key] = result.value;
 		}
 	}
