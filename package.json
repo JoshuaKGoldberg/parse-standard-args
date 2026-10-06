@@ -1,7 +1,16 @@
 {
 	"name": "parse-standard-args",
 	"version": "0.1.0",
-	"description": "Parses CLI args with node:util parseArgs and a Standard Schema, with friendly errors and generated help.",
+	"description": "Parses CLI args with node:util parseArgs and a Standard Schema, with friendly errors and generated help. 🎛️",
+	"keywords": [
+		"cli",
+		"args",
+		"parseArgs",
+		"standard-schema",
+		"zod",
+		"valibot",
+		"arktype"
+	],
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/JoshuaKGoldberg/parse-standard-args.git"
@@ -14,7 +23,8 @@
 	"sideEffects": false,
 	"type": "module",
 	"exports": {
-		".": "./dist/index.mjs"
+		".": "./dist/index.mjs",
+		"./prompts": "./dist/prompts/index.mjs"
 	},
 	"files": [
 		"dist/"
@@ -31,14 +41,20 @@
 	"lint-staged": {
 		"*": "prettier --ignore-unknown --write"
 	},
+	"dependencies": {
+		"@standard-schema/spec": "^1.1.0"
+	},
 	"devDependencies": {
+		"@clack/prompts": "^1.8.1",
 		"@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
 		"@eslint/js": "10.0.1",
 		"@eslint/markdown": "8.0.3",
 		"@release-it/conventional-changelog": "12.0.0",
 		"@types/node": "26.6.2",
+		"@valibot/to-json-schema": "^1.8.0",
 		"@vitest/coverage-v8": "5.0.1",
 		"@vitest/eslint-plugin": "1.6.27",
+		"arktype": "^2.2.7",
 		"console-fail-test": "0.9.0",
 		"cspell": "10.3.3",
 		"eslint": "10.12.0",
@@ -63,10 +79,20 @@
 		"tsdown": "0.23.0",
 		"typescript": "5.9.3",
 		"typescript-eslint": "8.71.0",
-		"vitest": "5.0.1"
+		"valibot": "^1.5.0",
+		"vitest": "5.0.1",
+		"zod": "^4.6.5"
+	},
+	"peerDependencies": {
+		"@clack/prompts": ">=0.11"
+	},
+	"peerDependenciesMeta": {
+		"@clack/prompts": {
+			"optional": true
+		}
 	},
 	"packageManager": "pnpm@11.22.0",
 	"engines": {
-		"node": "^22.13.0 || ^24.11.0 || >=26.0.0"
+		"node": ">=18.7.0"
 	}
 }
