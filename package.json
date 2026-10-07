@@ -1,6 +1,6 @@
 {
 	"name": "parse-standard-args",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Parses CLI args with node:util parseArgs and a Standard Schema, with friendly errors and generated help. 🎛️",
 	"keywords": [
 		"cli",
