@@ -17,10 +17,10 @@ const options = z.object({
 	reason: z.array(z.enum(["author", "subscribed"])).default(["subscribed"]),
 });
 
-async function getHelpText(
+function getHelpText(
 	settings: CliSettings<OptionsDefinition, ArgsSchema | undefined>,
 ) {
-	const result = await parseStandardArgv(["--help"], settings);
+	const result = parseStandardArgv(["--help"], settings);
 
 	return result.type === "help" ? result.text : undefined;
 }
@@ -61,8 +61,8 @@ describe(parseStandardArgv, () => {
 	});
 
 	describe("built-in flags", () => {
-		it("lists option flags followed by built-in flags in help text", async () => {
-			expect(await getHelpText({ name: "cli", options, version: "1.2.3" }))
+		it("lists option flags followed by built-in flags in help text", () => {
+			expect(getHelpText({ name: "cli", options, version: "1.2.3" }))
 				.toMatchInlineSnapshot(`
 				"Usage: cli [options]
 
@@ -77,15 +77,13 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("does not include a version flag when no version is given", async () => {
-			expect(await getHelpText({ name: "cli", options })).not.toContain(
-				"--version",
-			);
+		it("does not include a version flag when no version is given", () => {
+			expect(getHelpText({ name: "cli", options })).not.toContain("--version");
 		});
 
-		it("omits built-in short aliases when options already use them", async () => {
+		it("omits built-in short aliases when options already use them", () => {
 			expect(
-				await getHelpText({
+				getHelpText({
 					name: "cli",
 					options: z.object({
 						host: z.string().optional().meta({ short: "h" }),
@@ -104,9 +102,9 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("omits built-in short aliases when they are disabled", async () => {
+		it("omits built-in short aliases when they are disabled", () => {
 			expect(
-				await getHelpText({
+				getHelpText({
 					help: { short: false },
 					name: "cli",
 					options: z.object({}),
@@ -121,9 +119,9 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("does not default the version short alias to one taken by the help flag", async () => {
+		it("does not default the version short alias to one taken by the help flag", () => {
 			expect(
-				await getHelpText({
+				getHelpText({
 					help: { short: "v" },
 					name: "cli",
 					options: z.object({}),
@@ -138,20 +136,20 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("throws a TypeError when a built-in flag's custom short alias is used by an option", async () => {
-			await expect(
+		it("throws a TypeError when a built-in flag's custom short alias is used by an option", () => {
+			expect(() =>
 				parseStandardArgv([], {
 					help: { short: "x" },
 					name: "cli",
 					options: z.object({ x: z.string().optional().meta({ short: "x" }) }),
 				}),
-			).rejects.toThrow(
+			).toThrow(
 				new TypeError("--x and --help can't both use the short alias -x."),
 			);
 		});
 
-		it("throws a TypeError when two options use the same short alias", async () => {
-			await expect(
+		it("throws a TypeError when two options use the same short alias", () => {
+			expect(() =>
 				parseStandardArgv([], {
 					name: "cli",
 					options: z.object({
@@ -159,20 +157,20 @@ describe(parseStandardArgv, () => {
 						b: z.string().optional().meta({ short: "q" }),
 					}),
 				}),
-			).rejects.toThrow(
+			).toThrow(
 				new TypeError("--a and --b can't both use the short alias -q."),
 			);
 		});
 
-		it("throws a TypeError when the built-in flags' custom short aliases are the same", async () => {
-			await expect(
+		it("throws a TypeError when the built-in flags' custom short aliases are the same", () => {
+			expect(() =>
 				parseStandardArgv([], {
 					help: { short: "x" },
 					name: "cli",
 					options: z.object({}),
 					version: { short: "x", version: "1.2.3" },
 				}),
-			).rejects.toThrow(
+			).toThrow(
 				new TypeError(
 					"--help and --version can't both use the short alias -x.",
 				),
@@ -181,13 +179,13 @@ describe(parseStandardArgv, () => {
 
 		it.each(["ab", ""])(
 			"throws a TypeError when a short alias is %j",
-			async (short) => {
-				await expect(
+			(short) => {
+				expect(() =>
 					parseStandardArgv([], {
 						name: "cli",
 						options: z.object({ all: z.boolean().optional().meta({ short }) }),
 					}),
-				).rejects.toThrow(
+				).toThrow(
 					new TypeError(
 						`--all's short alias must be a single character, but it's "${short}".`,
 					),
@@ -197,9 +195,9 @@ describe(parseStandardArgv, () => {
 	});
 
 	describe("parse", () => {
-		it("returns values with defaults applied when no args are given", async () => {
+		it("returns values with defaults applied when no args are given", () => {
 			expect(
-				await parseStandardArgv([], {
+				parseStandardArgv([], {
 					name: "cli",
 					options: options.partial({ owner: true }),
 				}),
@@ -217,9 +215,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns converted values when args are given", async () => {
+		it("returns converted values when args are given", () => {
 			expect(
-				await parseStandardArgv(
+				parseStandardArgv(
 					[
 						"--bandwidth=12",
 						"--no-color",
@@ -248,9 +246,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns values when options are a record of schemas", async () => {
+		it("returns values when options are a record of schemas", () => {
 			expect(
-				await parseStandardArgv(["--name", "Josh", "--pattern", "^a"], {
+				parseStandardArgv(["--name", "Josh", "--pattern", "^a"], {
 					name: "cli",
 					options: {
 						count: z.number().default(1),
@@ -270,9 +268,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns values when options are a Valibot schema", async () => {
+		it("returns values when options are a Valibot schema", () => {
 			expect(
-				await parseStandardArgv(["--name", "Josh"], {
+				parseStandardArgv(["--name", "Josh"], {
 					name: "cli",
 					options: toStandardJsonSchema(
 						v.object({ count: v.optional(v.number(), 3), name: v.string() }),
@@ -287,9 +285,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns values when options are an ArkType schema", async () => {
+		it("returns values when options are an ArkType schema", () => {
 			expect(
-				await parseStandardArgv(["--count", "5", "--level", "a"], {
+				parseStandardArgv(["--count", "5", "--level", "a"], {
 					name: "cli",
 					options: type({ "count?": "number.integer", level: "'a' | 'b'" }),
 				}),
@@ -302,8 +300,8 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns help text when given --help", async () => {
-			const result = await parseStandardArgv(["--help"], {
+		it("returns help text when given --help", () => {
+			const result = parseStandardArgv(["--help"], {
 				description: "Does things.",
 				examples: ["cli --owner me"],
 				footer: "Learn more at https://example.com",
@@ -334,25 +332,25 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("returns help text when given -h", async () => {
+		it("returns help text when given -h", () => {
 			const parse = (args: string[]) =>
 				parseStandardArgv(args, { name: "cli", options });
 
-			expect(await parse(["-h"])).toEqual(await parse(["--help"]));
+			expect(parse(["-h"])).toEqual(parse(["--help"]));
 		});
 
-		it("returns help text when given --help alongside invalid args", async () => {
+		it("returns help text when given --help alongside invalid args", () => {
 			const parse = (args: string[]) =>
 				parseStandardArgv(args, { name: "cli", options });
 
-			expect(
-				await parse(["--bandwidth", "abc", "--unknown", "--help"]),
-			).toEqual(await parse(["--help"]));
+			expect(parse(["--bandwidth", "abc", "--unknown", "--help"])).toEqual(
+				parse(["--help"]),
+			);
 		});
 
-		it("does not return help text when given --help=false", async () => {
+		it("does not return help text when given --help=false", () => {
 			expect(
-				await parseStandardArgv(["--help=false", "--owner", "me"], {
+				parseStandardArgv(["--help=false", "--owner", "me"], {
 					name: "cli",
 					options,
 				}),
@@ -361,9 +359,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("does not return help text when given --no-help", async () => {
+		it("does not return help text when given --no-help", () => {
 			expect(
-				await parseStandardArgv(["--no-help", "--owner", "me"], {
+				parseStandardArgv(["--no-help", "--owner", "me"], {
 					name: "cli",
 					options,
 				}),
@@ -372,26 +370,26 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("does not add -h when an option uses it", async () => {
+		it("does not add -h when an option uses it", () => {
 			const parse = (args: string[]) =>
 				parseStandardArgv(args, {
 					name: "cli",
 					options: z.object({ host: z.string().meta({ short: "h" }) }),
 				});
 
-			expect(await parse(["-h", "localhost"])).toEqual({
+			expect(parse(["-h", "localhost"])).toEqual({
 				positionals: [],
 				type: "values",
 				unknown: {},
 				values: { host: "localhost" },
 				warnings: [],
 			});
-			expect(await parse(["--help"])).toMatchObject({ type: "help" });
+			expect(parse(["--help"])).toMatchObject({ type: "help" });
 		});
 
-		it("does not add a built-in help flag when an option is named help", async () => {
+		it("does not add a built-in help flag when an option is named help", () => {
 			expect(
-				await parseStandardArgv(["--help", "me"], {
+				parseStandardArgv(["--help", "me"], {
 					name: "cli",
 					options: z.object({ help: z.string().optional() }),
 				}),
@@ -404,9 +402,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("reports --help as unknown when help is false", async () => {
+		it("reports --help as unknown when help is false", () => {
 			expect(
-				await parseStandardArgv(["--help", "--owner", "me"], {
+				parseStandardArgv(["--help", "--owner", "me"], {
 					help: false,
 					name: "cli",
 					options,
@@ -426,16 +424,14 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns help text when --help follows a flag missing its value", async () => {
+		it("returns help text when --help follows a flag missing its value", () => {
 			const parse = (args: string[]) =>
 				parseStandardArgv(args, { name: "cli", options });
 
-			expect(await parse(["--owner", "--help"])).toEqual(
-				await parse(["--help"]),
-			);
+			expect(parse(["--owner", "--help"])).toEqual(parse(["--help"]));
 		});
 
-		it("returns help text when given a custom help short alias", async () => {
+		it("returns help text when given a custom help short alias", () => {
 			const parse = (args: string[]) =>
 				parseStandardArgv(args, {
 					help: { short: "?" },
@@ -443,12 +439,12 @@ describe(parseStandardArgv, () => {
 					options: z.object({}),
 				});
 
-			expect(await parse(["-?"])).toEqual(await parse(["--help"]));
+			expect(parse(["-?"])).toEqual(parse(["--help"]));
 		});
 
-		it("returns the version when the version is given as an object", async () => {
+		it("returns the version when the version is given as an object", () => {
 			expect(
-				await parseStandardArgv(["-v"], {
+				parseStandardArgv(["-v"], {
 					name: "cli",
 					options: z.object({}),
 					version: { version: "1.2.3" },
@@ -459,9 +455,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns the version when given --version", async () => {
+		it("returns the version when given --version", () => {
 			expect(
-				await parseStandardArgv(["--version"], {
+				parseStandardArgv(["--version"], {
 					name: "cli",
 					options,
 					version: "1.2.3",
@@ -472,9 +468,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns the version when given -v", async () => {
+		it("returns the version when given -v", () => {
 			expect(
-				await parseStandardArgv(["-v"], {
+				parseStandardArgv(["-v"], {
 					name: "cli",
 					options,
 					version: "1.2.3",
@@ -485,9 +481,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns help over the version when given both", async () => {
+		it("returns help over the version when given both", () => {
 			expect(
-				await parseStandardArgv(["-v", "-h"], {
+				parseStandardArgv(["-v", "-h"], {
 					name: "cli",
 					options,
 					version: "1.2.3",
@@ -495,7 +491,7 @@ describe(parseStandardArgv, () => {
 			).toMatchObject({ type: "help" });
 		});
 
-		it("does not add -v when an option uses it", async () => {
+		it("does not add -v when an option uses it", () => {
 			const parse = (args: string[]) =>
 				parseStandardArgv(args, {
 					name: "cli",
@@ -505,22 +501,22 @@ describe(parseStandardArgv, () => {
 					version: "1.2.3",
 				});
 
-			expect(await parse(["-v"])).toEqual({
+			expect(parse(["-v"])).toEqual({
 				positionals: [],
 				type: "values",
 				unknown: {},
 				values: { verbose: true },
 				warnings: [],
 			});
-			expect(await parse(["--version"])).toEqual({
+			expect(parse(["--version"])).toEqual({
 				text: "1.2.3",
 				type: "version",
 			});
 		});
 
-		it("does not add a built-in version flag when an option is named version", async () => {
+		it("does not add a built-in version flag when an option is named version", () => {
 			expect(
-				await parseStandardArgv(["--version", "2"], {
+				parseStandardArgv(["--version", "2"], {
 					name: "cli",
 					options: z.object({ version: z.string().optional() }),
 					version: "1.2.3",
@@ -531,9 +527,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("reports --version as unknown when no version is given", async () => {
+		it("reports --version as unknown when no version is given", () => {
 			expect(
-				await parseStandardArgv(["--version", "--owner", "me"], {
+				parseStandardArgv(["--version", "--owner", "me"], {
 					name: "cli",
 					options,
 				}),
@@ -544,9 +540,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns an error with usage guidance when a parse issue occurs", async () => {
+		it("returns an error with usage guidance when a parse issue occurs", () => {
 			expect(
-				await parseStandardArgv(["--owner", "me", "--bandwidth", "abc"], {
+				parseStandardArgv(["--owner", "me", "--bandwidth", "abc"], {
 					name: "cli",
 					options,
 				}),
@@ -564,9 +560,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("omits usage guidance from errors when help is false", async () => {
+		it("omits usage guidance from errors when help is false", () => {
 			expect(
-				await parseStandardArgv([], { help: false, name: "cli", options }),
+				parseStandardArgv([], { help: false, name: "cli", options }),
 			).toEqual({
 				issues: [
 					{ flag: "owner", kind: "missing", message: "--owner is required." },
@@ -577,8 +573,8 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("reports a required flag once when it is missing", async () => {
-			expect(await parseStandardArgv([], { name: "cli", options })).toEqual({
+		it("reports a required flag once when it is missing", () => {
+			expect(parseStandardArgv([], { name: "cli", options })).toEqual({
 				issues: [
 					{ flag: "owner", kind: "missing", message: "--owner is required." },
 				],
@@ -588,9 +584,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("reports a required flag once when it is missing from a record of schemas", async () => {
+		it("reports a required flag once when it is missing from a record of schemas", () => {
 			expect(
-				await parseStandardArgv(["--other", "x"], {
+				parseStandardArgv(["--other", "x"], {
 					name: "cli",
 					options: { name: z.string(), other: z.string() },
 				}),
@@ -604,10 +600,8 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("reports only the parse issue when a required flag is missing its value", async () => {
-			expect(
-				await parseStandardArgv(["--owner"], { name: "cli", options }),
-			).toEqual({
+		it("reports only the parse issue when a required flag is missing its value", () => {
+			expect(parseStandardArgv(["--owner"], { name: "cli", options })).toEqual({
 				issues: [
 					{
 						flag: "owner",
@@ -621,9 +615,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("reports only the parse issue when a flag also fails schema validation", async () => {
+		it("reports only the parse issue when a flag also fails schema validation", () => {
 			expect(
-				await parseStandardArgv(["--count", "abc", "--other=x"], {
+				parseStandardArgv(["--count", "abc", "--other=x"], {
 					name: "cli",
 					options: z.object({
 						count: z.number(),
@@ -653,8 +647,8 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("reports schema issues alongside parse issues for other flags", async () => {
-			const result = await parseStandardArgv(
+		it("reports schema issues alongside parse issues for other flags", () => {
+			const result = parseStandardArgv(
 				["--bandwidth", "0", "--reason", "nope", "--ownr", "x", "stray"],
 				{ name: "cli", options },
 			);
@@ -669,33 +663,24 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("reports a thrown transform error without a stack", async () => {
-			expect(
-				await parseStandardArgv(["--pattern", "("], {
+		it("throws a TypeError when a Zod transform throws", () => {
+			expect(() =>
+				parseStandardArgv(["--pattern", "("], {
 					name: "cli",
 					options: z.object({
 						pattern: z.string().transform((value) => new RegExp(value)),
 					}),
 				}),
-			).toEqual({
-				issues: [
-					{
-						kind: "validation",
-						message: "Invalid regular expression: /(/: Unterminated group",
-					},
-				],
-				text: [
-					"Invalid regular expression: /(/: Unterminated group",
-					"Run 'cli --help' for usage.",
-				].join("\n"),
-				type: "error",
-				warnings: [],
-			});
+			).toThrow(
+				new TypeError(
+					"Schemas must validate synchronously and report issues rather than throw, but one returned a Promise.",
+				),
+			);
 		});
 
-		it("collects unknown flags when not strict", async () => {
+		it("collects unknown flags when not strict", () => {
 			expect(
-				await parseStandardArgv(["--extra", "--name=x", "stray"], {
+				parseStandardArgv(["--extra", "--name=x", "stray"], {
 					name: "cli",
 					options: z.object({ name: z.string().optional() }),
 					strict: false,
@@ -709,9 +694,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns values with warnings when strict is warn", async () => {
+		it("returns values with warnings when strict is warn", () => {
 			expect(
-				await parseStandardArgv(["--nmae=x", "stray"], {
+				parseStandardArgv(["--nmae=x", "stray"], {
 					name: "cli",
 					options: z.object({ name: z.string().optional() }),
 					strict: "warn",
@@ -733,9 +718,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("reports an issue for a flag missing its value and parses the next flag", async () => {
+		it("reports an issue for a flag missing its value and parses the next flag", () => {
 			expect(
-				await parseStandardArgv(["--owner", "--repository", "b"], {
+				parseStandardArgv(["--owner", "--repository", "b"], {
 					name: "cli",
 					options: z.object({ owner: z.string(), repository: z.string() }),
 				}),
@@ -753,9 +738,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("does not report a missing flag when its schema accepts it being missing", async () => {
+		it("does not report a missing flag when its schema accepts it being missing", () => {
 			expect(
-				await parseStandardArgv([], {
+				parseStandardArgv([], {
 					name: "cli",
 					options: z.object({
 						name: z.preprocess((value) => value ?? "anonymous", z.string()),
@@ -770,9 +755,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("reports a missing flag as required when its schema rejects it being missing, even if it has no required JSON Schema", async () => {
+		it("reports a missing flag as required when its schema rejects it being missing, even if it has no required JSON Schema", () => {
 			expect(
-				await parseStandardArgv([], {
+				parseStandardArgv([], {
 					name: "cli",
 					options: z.object({ value: z.custom<string>((value) => !!value) }),
 				}),
@@ -786,36 +771,34 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("reports missing flags named like object properties as required", async () => {
+		it("reports missing flags named like object properties as required", () => {
 			const parse = (args: string[]) =>
 				parseStandardArgv(args, {
 					name: "cli",
 					options: z.object({ constructor: z.string(), toString: z.string() }),
 				});
 
-			expect(await parse([])).toMatchObject({
+			expect(parse([])).toMatchObject({
 				issues: [
 					{ flag: "constructor", kind: "missing" },
 					{ flag: "toString", kind: "missing" },
 				],
 				type: "error",
 			});
-			expect(
-				await parse(["--constructor", "a", "--toString", "b"]),
-			).toMatchObject({
+			expect(parse(["--constructor", "a", "--toString", "b"])).toMatchObject({
 				type: "values",
 				values: { constructor: "a", toString: "b" },
 			});
 		});
 
-		it("returns values when a record of schemas has a flag named __proto__", async () => {
+		it("returns values when a record of schemas has a flag named __proto__", () => {
 			const options = Object.fromEntries([
 				["__proto__", z.object({ polluted: z.boolean() })],
 			]) as Record<string, z.ZodType>;
-			const result = await parseStandardArgv(
-				["--__proto__", '{"polluted":true}'],
-				{ name: "cli", options },
-			);
+			const result = parseStandardArgv(["--__proto__", '{"polluted":true}'], {
+				name: "cli",
+				options,
+			});
 
 			expect(result.type === "values" && Object.entries(result.values)).toEqual(
 				[["__proto__", { polluted: true }]],
@@ -823,9 +806,9 @@ describe(parseStandardArgv, () => {
 			expect(({} as Record<string, unknown>).polluted).toBeUndefined();
 		});
 
-		it("includes warnings when an error is returned and strict is warn", async () => {
+		it("includes warnings when an error is returned and strict is warn", () => {
 			expect(
-				await parseStandardArgv(["--bogus", "--count", "x"], {
+				parseStandardArgv(["--bogus", "--count", "x"], {
 					name: "cli",
 					options: z.object({ count: z.number() }),
 					strict: "warn",
@@ -846,9 +829,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("omits usage guidance from errors when an option replaces the built-in help flag", async () => {
+		it("omits usage guidance from errors when an option replaces the built-in help flag", () => {
 			expect(
-				await parseStandardArgv(["--bogus"], {
+				parseStandardArgv(["--bogus"], {
 					name: "cli",
 					options: z.object({ help: z.string().optional() }),
 				}),
@@ -858,9 +841,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("includes the terminator index when -- is given", async () => {
+		it("includes the terminator index when -- is given", () => {
 			expect(
-				await parseStandardArgv(["a", "--", "--b"], {
+				parseStandardArgv(["a", "--", "--b"], {
 					name: "cli",
 					options: z.object({}),
 					positionals: z.array(z.string()),
@@ -875,9 +858,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns a negative number positional when positionals are numbers", async () => {
+		it("returns a negative number positional when positionals are numbers", () => {
 			expect(
-				await parseStandardArgv(["-5", "3"], {
+				parseStandardArgv(["-5", "3"], {
 					name: "cli",
 					options: z.object({}),
 					positionals: z.array(z.number()),
@@ -888,7 +871,7 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns converted values when options are mixed unions", async () => {
+		it("returns converted values when options are mixed unions", () => {
 			const parse = (args: string[]) =>
 				parseStandardArgv(args, {
 					name: "cli",
@@ -898,16 +881,16 @@ describe(parseStandardArgv, () => {
 					}),
 				});
 
-			expect(await parse(["--concurrency", "4", "--level", "1"])).toMatchObject(
-				{ values: { concurrency: 4, level: 1 } },
+			expect(parse(["--concurrency", "4", "--level", "1"])).toMatchObject({
+				values: { concurrency: 4, level: 1 },
+			});
+			expect(parse(["--concurrency", "auto", "--level", "true"])).toMatchObject(
+				{ values: { concurrency: "auto", level: true } },
 			);
-			expect(
-				await parse(["--concurrency", "auto", "--level", "true"]),
-			).toMatchObject({ values: { concurrency: "auto", level: true } });
 		});
 
-		it("throws a TypeError when options are not an object schema", async () => {
-			await expect(
+		it("throws a TypeError when options are not an object schema", () => {
+			expect(() =>
 				parseStandardArgv([], {
 					name: "cli",
 					options: z.union([
@@ -915,12 +898,12 @@ describe(parseStandardArgv, () => {
 						z.object({ b: z.string() }),
 					]),
 				}),
-			).rejects.toThrow(TypeError);
+			).toThrow(TypeError);
 		});
 
-		it("reports an unexpected positional when no positionals schema is given", async () => {
+		it("reports an unexpected positional when no positionals schema is given", () => {
 			expect(
-				await parseStandardArgv(["stray"], {
+				parseStandardArgv(["stray"], {
 					name: "cli",
 					options: z.object({}),
 				}),
@@ -932,9 +915,9 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns validated positionals when a positionals schema is given", async () => {
+		it("returns validated positionals when a positionals schema is given", () => {
 			expect(
-				await parseStandardArgv(["3", "--verbose", "a", "b"], {
+				parseStandardArgv(["3", "--verbose", "a", "b"], {
 					name: "cli",
 					options: z.object({ verbose: z.boolean().default(false) }),
 					positionals: z.tuple([z.number().int()], z.string()),
@@ -948,7 +931,7 @@ describe(parseStandardArgv, () => {
 			});
 		});
 
-		it("returns positional issues when positionals fail conversion or validation", async () => {
+		it("returns positional issues when positionals fail conversion or validation", () => {
 			const parse = (args: string[]) =>
 				parseStandardArgv(args, {
 					name: "cli",
@@ -956,7 +939,7 @@ describe(parseStandardArgv, () => {
 					positionals: z.array(z.number().positive()).min(1),
 				});
 
-			expect(await parse(["0"])).toEqual({
+			expect(parse(["0"])).toEqual({
 				issues: [
 					{
 						kind: "validation",
@@ -970,7 +953,7 @@ describe(parseStandardArgv, () => {
 				type: "error",
 				warnings: [],
 			});
-			expect(await parse(["abc"])).toEqual({
+			expect(parse(["abc"])).toEqual({
 				issues: [
 					{
 						kind: "invalid",
@@ -988,8 +971,8 @@ describe(parseStandardArgv, () => {
 	});
 
 	describe("help text", () => {
-		it("includes defaults when options are an ArkType schema with defaults", async () => {
-			const helpText = await getHelpText({
+		it("includes defaults when options are an ArkType schema with defaults", () => {
+			const helpText = getHelpText({
 				name: "cli",
 				options: type({
 					color: ["boolean", "=", true],
@@ -1007,10 +990,10 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("wraps descriptions to the terminal width when stdout is a TTY", async () => {
+		it("wraps descriptions to the terminal width when stdout is a TTY", () => {
 			setStdout({ columns: 40, isTTY: true });
 
-			const helpText = await getHelpText({
+			const helpText = getHelpText({
 				name: "cli",
 				options: z.object({
 					cache: z
@@ -1031,8 +1014,8 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("includes the positionals placeholder when the positionals schema has one", async () => {
-			const helpText = await getHelpText({
+		it("includes the positionals placeholder when the positionals schema has one", () => {
+			const helpText = getHelpText({
 				name: "cli",
 				options: z.object({}),
 				positionals: z.array(z.string()).meta({ placeholder: "files" }),
@@ -1046,8 +1029,8 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("uses positionalsUsage over the placeholder when both are given", async () => {
-			const helpText = await getHelpText({
+		it("uses positionalsUsage over the placeholder when both are given", () => {
+			const helpText = getHelpText({
 				name: "cli",
 				options: z.object({}),
 				positionals: z.array(z.string()).meta({ placeholder: "files" }),
@@ -1071,8 +1054,8 @@ describe(parseStandardArgv, () => {
 			[z.array(z.string()).meta({ placeholder: "file" }).length(1), "<file>"],
 		])(
 			"derives the positionals usage from the schema's item limits",
-			async (positionals, expected) => {
-				const helpText = await getHelpText({
+			(positionals, expected) => {
+				const helpText = getHelpText({
 					name: "cli",
 					options: z.object({}),
 					positionals,
@@ -1084,8 +1067,8 @@ describe(parseStandardArgv, () => {
 			},
 		);
 
-		it("includes an arguments section when the positionals schema has a description", async () => {
-			const helpText = await getHelpText({
+		it("includes an arguments section when the positionals schema has a description", () => {
+			const helpText = getHelpText({
 				name: "cli",
 				options: z.object({ dryRun: z.boolean().default(false) }),
 				positionals: z
@@ -1106,8 +1089,8 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("uses the usage override in place of options and positionals when given", async () => {
-			const helpText = await getHelpText({
+		it("uses the usage override in place of options and positionals when given", () => {
+			const helpText = getHelpText({
 				name: "cli",
 				options: z.object({ dryRun: z.boolean().default(false) }),
 				positionals: z.array(z.string()),
@@ -1123,8 +1106,8 @@ describe(parseStandardArgv, () => {
 			`);
 		});
 
-		it("uses custom descriptions and shorts when built-in flags are customized", async () => {
-			const helpText = await getHelpText({
+		it("uses custom descriptions and shorts when built-in flags are customized", () => {
+			const helpText = getHelpText({
 				help: { description: "Print help", short: "?" },
 				name: "cli",
 				options: z.object({}),

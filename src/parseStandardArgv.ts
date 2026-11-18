@@ -153,15 +153,13 @@ export interface VersionFlagSettings extends BuiltinFlagSettings {
  * @param settings The CLI's name, options, positionals, and help metadata.
  * @returns Parsed values and positionals, or help, version, or error text.
  */
-export async function parseStandardArgv<
+export function parseStandardArgv<
 	Options extends OptionsDefinition,
 	Positionals extends ArgsSchema | undefined = undefined,
 >(
 	args: string[],
 	settings: CliSettings<Options, Positionals>,
-): Promise<
-	CliParseResult<InferOptions<Options>, InferPositionals<Positionals>>
-> {
+): CliParseResult<InferOptions<Options>, InferPositionals<Positionals>> {
 	type Values = InferOptions<Options>;
 	type PositionalValues = InferPositionals<Positionals>;
 
@@ -241,12 +239,11 @@ export async function parseStandardArgv<
 		(issue) => issue.kind === "invalid" && !issue.flag,
 	);
 
-	const [validatedOptions, validatedPositionals] = await Promise.all([
-		validateOptions<Values>(options, optionValues),
+	const validatedOptions = validateOptions<Values>(options, optionValues);
+	const validatedPositionals =
 		positionals && positionalsConverted
 			? validatePositionals<PositionalValues>(positionals, raw.positionals)
-			: ({ value: raw.positionals } as ValidationResult<PositionalValues>),
-	]);
+			: ({ value: raw.positionals } as ValidationResult<PositionalValues>);
 	const validationIssues = validatedOptions.issues ?? [];
 	const parsedFlags = new Set(raw.issues.map((issue) => issue.flag));
 
@@ -275,7 +272,8 @@ export async function parseStandardArgv<
 		...(validatedPositionals.issues ?? []),
 	];
 
-	if (issues.length) {
+	// Validation issues are always in issues, but checking them narrows the values below.
+	if (issues.length || validatedOptions.issues || validatedPositionals.issues) {
 		return {
 			issues,
 			text: [
@@ -290,13 +288,13 @@ export async function parseStandardArgv<
 	}
 
 	return {
-		positionals: validatedPositionals.value as PositionalValues,
+		positionals: validatedPositionals.value,
 		...(raw.terminatorIndex !== undefined && {
 			terminatorIndex: raw.terminatorIndex,
 		}),
 		type: "values",
 		unknown: raw.unknown,
-		values: validatedOptions.value as Values,
+		values: validatedOptions.value,
 		warnings: raw.warnings,
 	};
 }

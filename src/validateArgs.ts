@@ -20,12 +20,12 @@ interface IssueTarget {
  * @param values Parsed (but not yet validated) flag values.
  * @returns Either the validated values or issues explaining why they're invalid.
  */
-export async function validateOptions<Value>(
+export function validateOptions<Value>(
 	options: OptionsDefinition,
 	values: Record<string, unknown>,
-): Promise<ValidationResult<Value>> {
+): ValidationResult<Value> {
 	if (isArgsSchema(options)) {
-		return await validateSchema(options, values, (path) => {
+		return validateSchema(options, values, (path) => {
 			if (!path.length) {
 				return undefined;
 			}
@@ -41,7 +41,7 @@ export async function validateOptions<Value>(
 
 	for (const [key, schema] of Object.entries(options)) {
 		const provided = Object.hasOwn(values, key);
-		const result = await validateSchema(
+		const result = validateSchema(
 			schema,
 			provided ? values[key] : undefined,
 			(path) => ({
@@ -67,11 +67,11 @@ export async function validateOptions<Value>(
  * @param values Parsed (but not yet validated) positional values.
  * @returns Either the validated positionals or issues explaining why they're invalid.
  */
-export async function validatePositionals<Value>(
+export function validatePositionals<Value>(
 	positionals: ArgsSchema,
 	values: unknown[],
-): Promise<ValidationResult<Value>> {
-	return await validateSchema(positionals, values, (path) => {
+): ValidationResult<Value> {
+	return validateSchema(positionals, values, (path) => {
 		const [index] = path;
 
 		return typeof index === "number"
@@ -97,17 +97,17 @@ function normalizePath(path: StandardSchemaV1.Issue["path"]): PropertyKey[] {
 	);
 }
 
-async function validateSchema<Value>(
+function validateSchema<Value>(
 	schema: ArgsSchema,
 	value: unknown,
 	getTarget: (path: PropertyKey[]) => IssueTarget | undefined,
-): Promise<ValidationResult<Value>> {
-	let result: StandardSchemaV1.Result<unknown>;
+): ValidationResult<Value> {
+	let result: ReturnType<ArgsSchema["~standard"]["validate"]>;
 
 	try {
-		result = await schema["~standard"].validate(value);
+		result = schema["~standard"].validate(value);
 	} catch (error) {
-		// Transforms such as `new RegExp(value)` may throw instead of reporting issues.
+		// Some schemas throw instead of reporting issues.
 		const target = getTarget([]);
 		const message = error instanceof Error ? error.message : String(error);
 
@@ -120,6 +120,16 @@ async function validateSchema<Value>(
 				},
 			],
 		};
+	}
+
+	// Zod also returns a rejected Promise when a sync schema throws.
+	if (result instanceof Promise) {
+		// The rejection shouldn't crash the process on top of the TypeError.
+		result.catch(() => undefined);
+
+		throw new TypeError(
+			"Schemas must validate synchronously and report issues rather than throw, but one returned a Promise.",
+		);
 	}
 
 	if (!result.issues) {

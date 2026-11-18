@@ -27,7 +27,7 @@ Define your CLI's options as one object schema from any library that supports [S
 import { parseStandardArgv } from "parse-standard-args";
 import { z } from "zod";
 
-const parsed = await parseStandardArgv(process.argv.slice(2), {
+const parsed = parseStandardArgv(process.argv.slice(2), {
 	description: "Greets people from the command-line. 👋",
 	examples: ["greet --name Josh --times 3"],
 	name: "greet",
@@ -120,8 +120,8 @@ Short flags can take inline values too, as in `-f=value` or `-q=false`.
 An unknown short flag group is reported once, as in `Unknown flag: -w (in -weird.js)`.
 When positionals are allowed, args starting with `-` can be passed as positionals after a `--` terminator, as in `format -- -weird.js`, and negative numbers are positionals when the next positional is numeric, as in `offset -5`.
 
-> Errors thrown by schema transforms, such as `new RegExp(value)` on an invalid pattern, are reported without a stack trace, but can't be attributed to their flag.
-> Prefer reporting issues instead, such as with Zod's `ctx.addIssue`, so the error names the flag.
+> Schemas must validate synchronously and report issues rather than throw, such as with Zod's `ctx.addIssue`.
+> A schema that returns a Promise throws a `TypeError`, and Zod returns one when a transform throws, such as `new RegExp(value)` on an invalid pattern.
 
 Metadata for help text and parsing comes from `.describe()` and `.meta()` (or your library's equivalent):
 
@@ -134,8 +134,8 @@ Metadata for help text and parsing comes from `.describe()` and `.meta()` (or yo
 | `placeholder`        | Name for the flag's value in `--help`, as in `<regex>` |
 | `short`              | Single-character alias, as in `-l`                     |
 
-`parseStandardArgv` rejects with a `TypeError` if a short alias isn't exactly one character, or if two flags (including the built-in `--help` and `--version`) share one.
-It also rejects if the options schema isn't an object, such as a union of objects, or can't be converted to JSON Schema.
+`parseStandardArgv` throws a `TypeError` if a short alias isn't exactly one character, or if two flags (including the built-in `--help` and `--version`) share one.
+It also throws if the options schema isn't an object, such as a union of objects, or can't be converted to JSON Schema.
 
 ### Positionals
 
@@ -144,7 +144,7 @@ Args after a `--` terminator are always positionals; `terminatorIndex` in parse 
 Its `placeholder`, `description`, `minItems`, and `maxItems` are used in help text, as in `<patterns...>` or `[globs...]`:
 
 ```ts
-const parsed = await parseStandardArgv(args, {
+const parsed = parseStandardArgv(args, {
 	name: "format",
 	options: z.object({ dryRun: z.boolean().default(false) }),
 	positionals: z.array(z.string()).min(1).meta({ placeholder: "patterns" }),
@@ -171,7 +171,7 @@ With `strict: false` or `"warn"`, unknown flags are collected into `unknown`.
 If no `positionals` schema is given, an unknown flag takes the next arg as its value (unless it looks like a flag), as in `--old-flag value` for `{ "old-flag": "value" }`.
 If positionals are allowed, there's no way to tell whether that arg was meant as the unknown flag's value or as a positional, so it's a positional.
 
-`parseStandardArgv` resolves with one of:
+`parseStandardArgv` returns one of:
 
 - `{ type: "values", positionals, terminatorIndex?, unknown, values, warnings }`: args were valid.
 - `{ type: "error", issues, text, warnings }`: args were invalid; `text` lists each issue, then `Run '<name> --help' for usage.`
@@ -236,7 +236,7 @@ For [Valibot](https://valibot.dev), wrap schemas with [`toStandardJsonSchema`](h
 import { toStandardJsonSchema } from "@valibot/to-json-schema";
 import * as v from "valibot";
 
-const parsed = await parseStandardArgv(args, {
+const parsed = parseStandardArgv(args, {
 	name: "greet",
 	options: toStandardJsonSchema(v.object({ name: v.string() })),
 });
