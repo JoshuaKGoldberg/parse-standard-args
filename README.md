@@ -24,10 +24,10 @@ npm i parse-standard-args
 Define your CLI's options as one object schema from any library that supports [Standard JSON Schema](https://standardschema.dev/json-schema), such as [Zod](https://zod.dev) 4.2+ or [ArkType](https://arktype.io):
 
 ```ts
-import { createCli } from "parse-standard-args";
+import { parseStandardArgv } from "parse-standard-args";
 import { z } from "zod";
 
-const cli = createCli({
+const parsed = await parseStandardArgv(process.argv.slice(2), {
 	description: "Greets people from the command-line. 👋",
 	examples: ["greet --name Josh --times 3"],
 	name: "greet",
@@ -39,15 +39,26 @@ const cli = createCli({
 	version: "1.0.0",
 });
 
-const parsed = await cli.run(process.argv.slice(2));
+switch (parsed.type) {
+	case "error":
+		console.error(parsed.text);
+		process.exitCode = 1;
+		break;
 
-if (parsed) {
-	// { loud: boolean; name: string; times: number }
-	const { loud, name, times } = parsed.values;
+	case "help":
+	case "version":
+		console.log(parsed.text);
+		break;
+
+	case "values": {
+		// { loud: boolean; name: string; times: number }
+		const { loud, name, times } = parsed.values;
+	}
 }
 ```
 
-`cli.run` parses args with [`node:util`'s `parseArgs`](https://nodejs.org/api/util.html#utilparseargsconfig), validates them with your schema, and either returns the values or prints what the user needs:
+`parseStandardArgv` parses args with [`node:util`'s `parseArgs`](https://nodejs.org/api/util.html#utilparseargsconfig) and validates them with your schema.
+It doesn't print anything or set `process.exitCode`: the result's `type` says whether to continue with the `values` or print its `text`:
 
 <!-- cspell:ignore nmae -->
 
@@ -76,7 +87,7 @@ Examples:
   greet --name Josh --times 3
 ```
 
-Errors set `process.exitCode` to `1` (configurable with `run(args, { exitCode })`), and nothing ever prints a stack trace.
+Errors never include a stack trace.
 Unknown flags get "did you mean" suggestions for likely typos and abbreviations, such as `--repo` for `--repository`, or `--l` for the flag whose short alias is `-l`.
 Hidden flags are never suggested.
 
@@ -123,8 +134,8 @@ Metadata for help text and parsing comes from `.describe()` and `.meta()` (or yo
 | `placeholder`        | Name for the flag's value in `--help`, as in `<regex>` |
 | `short`              | Single-character alias, as in `-l`                     |
 
-`createCli` throws a `TypeError` if a short alias isn't exactly one character, or if two flags (including the built-in `--help` and `--version`) share one.
-It also throws if the options schema isn't an object, such as a union of objects, or can't be converted to JSON Schema.
+`parseStandardArgv` rejects with a `TypeError` if a short alias isn't exactly one character, or if two flags (including the built-in `--help` and `--version`) share one.
+It also rejects if the options schema isn't an object, such as a union of objects, or can't be converted to JSON Schema.
 
 ### Positionals
 
@@ -133,40 +144,41 @@ Args after a `--` terminator are always positionals; `terminatorIndex` in parse 
 Its `placeholder`, `description`, `minItems`, and `maxItems` are used in help text, as in `<patterns...>` or `[globs...]`:
 
 ```ts
-const cli = createCli({
+const parsed = await parseStandardArgv(args, {
 	name: "format",
 	options: z.object({ dryRun: z.boolean().default(false) }),
 	positionals: z.array(z.string()).min(1).meta({ placeholder: "patterns" }),
 });
 ```
 
-### `createCli` Settings
+### `parseStandardArgv` Settings
 
-| Setting            | Type                                            | Description                                                                                                               |
-| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `description`      | `string`                                        | Sentence(s) describing what the CLI does, for help text.                                                                  |
-| `examples`         | `string[]`                                      | Example commands, printed as-is in help text.                                                                             |
-| `footer`           | `string`                                        | Text printed at the end of help text, such as a link to docs.                                                             |
-| `help`             | `boolean` or `{ description?, short? }`         | Whether to add `--help`, with `-h` if no option uses it (default: `true`).                                                |
-| `name`             | `string`                                        | Name of the CLI, as typed to run it. **Required.**                                                                        |
-| `options`          | schema or `Record<string, schema>`              | Either one object schema, or a record of per-flag schemas. **Required.**                                                  |
-| `positionals`      | schema                                          | Schema for the array of positionals; if omitted, none are allowed.                                                        |
-| `positionalsUsage` | `string`                                        | Usage text for positionals in help (default: from the schema's `placeholder`).                                            |
-| `strict`           | `boolean` or `"warn"`                           | Whether unknown flags and unexpected positionals are errors (default: `true`); `"warn"` ignores them but prints warnings. |
-| `usage`            | `string`                                        | Usage text after the name in help, such as `[--dry-run] <patterns...>`.                                                   |
-| `version`          | `string` or `{ version, description?, short? }` | Version to print for `--version`, with `-v` if no option uses it.                                                         |
+| Setting            | Type                                            | Description                                                                                                                |
+| ------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `description`      | `string`                                        | Sentence(s) describing what the CLI does, for help text.                                                                   |
+| `examples`         | `string[]`                                      | Example commands, printed as-is in help text.                                                                              |
+| `footer`           | `string`                                        | Text printed at the end of help text, such as a link to docs.                                                              |
+| `help`             | `boolean` or `{ description?, short? }`         | Whether to add `--help`, with `-h` if no option uses it (default: `true`).                                                 |
+| `name`             | `string`                                        | Name of the CLI, as typed to run it. **Required.**                                                                         |
+| `options`          | schema or `Record<string, schema>`              | Either one object schema, or a record of per-flag schemas. **Required.**                                                   |
+| `positionals`      | schema                                          | Schema for the array of positionals; if omitted, none are allowed.                                                         |
+| `positionalsUsage` | `string`                                        | Usage text for positionals in help (default: from the schema's `placeholder`).                                             |
+| `strict`           | `boolean` or `"warn"`                           | Whether unknown flags and unexpected positionals are errors (default: `true`); `"warn"` ignores them but reports warnings. |
+| `usage`            | `string`                                        | Usage text after the name in help, such as `[--dry-run] <patterns...>`.                                                    |
+| `version`          | `string` or `{ version, description?, short? }` | Version to print for `--version`, with `-v` if no option uses it.                                                          |
 
 With `strict: false` or `"warn"`, unknown flags are collected into `unknown`.
 If no `positionals` schema is given, an unknown flag takes the next arg as its value (unless it looks like a flag), as in `--old-flag value` for `{ "old-flag": "value" }`.
 If positionals are allowed, there's no way to tell whether that arg was meant as the unknown flag's value or as a positional, so it's a positional.
 
-`createCli` returns:
+`parseStandardArgv` resolves with one of:
 
-- `run(args, { error?, exitCode?, log?, warn? })`: parses args, printing help, version, warnings, or errors; returns `{ positionals, terminatorIndex?, unknown, values, warnings }` or `undefined` if the CLI shouldn't continue.
-- `parse(args)`: parses args without printing, returning a result whose `type` is `"error"`, `"help"`, `"values"`, or `"version"` (with the `text` to print, if any).
-  Both `"error"` and `"values"` results include `warnings`.
-- `formatHelp()`: returns the help text.
-- `flags`: descriptors of each flag, for building your own help or prompts.
+- `{ type: "values", positionals, terminatorIndex?, unknown, values, warnings }`: args were valid.
+- `{ type: "error", issues, text, warnings }`: args were invalid; `text` lists each issue, then `Run '<name> --help' for usage.`
+- `{ type: "help", text }`: `--help` was given.
+- `{ type: "version", text }`: `--version` was given.
+
+Use `formatIssues(warnings)` to print warnings when `strict` is `"warn"`.
 
 ### Lower-Level APIs
 
@@ -224,7 +236,7 @@ For [Valibot](https://valibot.dev), wrap schemas with [`toStandardJsonSchema`](h
 import { toStandardJsonSchema } from "@valibot/to-json-schema";
 import * as v from "valibot";
 
-const cli = createCli({
+const parsed = await parseStandardArgv(args, {
 	name: "greet",
 	options: toStandardJsonSchema(v.object({ name: v.string() })),
 });
