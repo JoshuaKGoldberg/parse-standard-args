@@ -2,6 +2,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import type { ArgsIssue, ArgsSchema, OptionsDefinition } from "./types.ts";
 
+import { assertSyncResult } from "./assertSyncResult.ts";
 import { isArgsSchema } from "./getJsonSchema.ts";
 
 export type ValidationResult<Value> =
@@ -20,12 +21,12 @@ interface IssueTarget {
  * @param values Parsed (but not yet validated) flag values.
  * @returns Either the validated values or issues explaining why they're invalid.
  */
-export async function validateOptions<Value>(
+export function validateOptions<Value>(
 	options: OptionsDefinition,
 	values: Record<string, unknown>,
-): Promise<ValidationResult<Value>> {
+): ValidationResult<Value> {
 	if (isArgsSchema(options)) {
-		return await validateSchema(options, values, (path) => {
+		return validateSchema(options, values, (path) => {
 			if (!path.length) {
 				return undefined;
 			}
@@ -41,7 +42,7 @@ export async function validateOptions<Value>(
 
 	for (const [key, schema] of Object.entries(options)) {
 		const provided = Object.hasOwn(values, key);
-		const result = await validateSchema(
+		const result = validateSchema(
 			schema,
 			provided ? values[key] : undefined,
 			(path) => ({
@@ -67,11 +68,11 @@ export async function validateOptions<Value>(
  * @param values Parsed (but not yet validated) positional values.
  * @returns Either the validated positionals or issues explaining why they're invalid.
  */
-export async function validatePositionals<Value>(
+export function validatePositionals<Value>(
 	positionals: ArgsSchema,
 	values: unknown[],
-): Promise<ValidationResult<Value>> {
-	return await validateSchema(positionals, values, (path) => {
+): ValidationResult<Value> {
+	return validateSchema(positionals, values, (path) => {
 		const [index] = path;
 
 		return typeof index === "number"
@@ -97,17 +98,17 @@ function normalizePath(path: StandardSchemaV1.Issue["path"]): PropertyKey[] {
 	);
 }
 
-async function validateSchema<Value>(
+function validateSchema<Value>(
 	schema: ArgsSchema,
 	value: unknown,
 	getTarget: (path: PropertyKey[]) => IssueTarget | undefined,
-): Promise<ValidationResult<Value>> {
-	let result: StandardSchemaV1.Result<unknown>;
+): ValidationResult<Value> {
+	let result: ReturnType<ArgsSchema["~standard"]["validate"]>;
 
 	try {
-		result = await schema["~standard"].validate(value);
+		result = schema["~standard"].validate(value);
 	} catch (error) {
-		// Transforms such as `new RegExp(value)` may throw instead of reporting issues.
+		// Some schemas throw instead of reporting issues.
 		const target = getTarget([]);
 		const message = error instanceof Error ? error.message : String(error);
 
@@ -122,12 +123,14 @@ async function validateSchema<Value>(
 		};
 	}
 
-	if (!result.issues) {
-		return { value: result.value as Value };
+	const synced = assertSyncResult(result);
+
+	if (!synced.issues) {
+		return { value: synced.value as Value };
 	}
 
 	return {
-		issues: result.issues.map((issue) => {
+		issues: synced.issues.map((issue) => {
 			const target = getTarget(normalizePath(issue.path));
 
 			return {

@@ -74,28 +74,6 @@ export interface CliParseVersion {
 	type: "version";
 }
 
-export interface CliRunSettings {
-	/**
-	 * Prints errors (default: console.error).
-	 */
-	error?: (text: string) => void;
-
-	/**
-	 * Exit code to set on `process.exitCode` for errors (default: 1).
-	 */
-	exitCode?: number;
-
-	/**
-	 * Prints help and version text (default: console.log).
-	 */
-	log?: (text: string) => void;
-
-	/**
-	 * Prints warnings, when strict is "warn" (default: console.warn).
-	 */
-	warn?: (text: string) => void;
-}
-
 export interface CliSettings<
 	Options extends OptionsDefinition,
 	Positionals extends ArgsSchema | undefined,
@@ -169,18 +147,21 @@ export interface VersionFlagSettings extends BuiltinFlagSettings {
 }
 
 /**
- * Creates a CLI that parses args with `node:util`'s `parseArgs`, validates them
- * with Standard Schemas, and generates help text and friendly errors.
+ * Parses args with `node:util`'s `parseArgs` and validates them with Standard Schemas.
+ * Nothing is printed: results include help, version, or error text for the CLI to print.
+ * @param args Raw command-line args, such as `process.argv.slice(2)`.
  * @param settings The CLI's name, options, positionals, and help metadata.
- * @returns Functions to parse args, run with printing, and format help.
+ * @returns Parsed values and positionals, or help, version, or error text.
  */
-export function createCli<
+export function parseStandardArgv<
 	Options extends OptionsDefinition,
 	Positionals extends ArgsSchema | undefined = undefined,
->(settings: CliSettings<Options, Positionals>) {
+>(
+	args: string[],
+	settings: CliSettings<Options, Positionals>,
+): CliParseResult<InferOptions<Options>, InferPositionals<Positionals>> {
 	type Values = InferOptions<Options>;
 	type PositionalValues = InferPositionals<Positionals>;
-	type Result = CliParseResult<Values, PositionalValues>;
 
 	const { help = true, name, options, positionals } = settings;
 	const version =
@@ -203,169 +184,119 @@ export function createCli<
 			}),
 		};
 
-	function getHelpText() {
-		return formatHelp({
-			...(settings.description && { description: settings.description }),
-			...(settings.examples && { examples: settings.examples }),
-			flags,
-			...(settings.footer && { footer: settings.footer }),
-			name,
-			...(positionalsDescription && {
-				positionals: {
-					...(positionalsDescription.description && {
-						description: positionalsDescription.description,
-					}),
-					usage:
-						settings.positionalsUsage ??
-						formatPositionalsUsage(positionalsDescription),
-				},
-			}),
-			...(settings.usage && { usage: settings.usage }),
-			// Descriptions wrap to the terminal's width when printing to one.
-			...(process.stdout.isTTY && { width: process.stdout.columns }),
-		});
-	}
+	const raw = parseRawArgs({
+		args,
+		flags,
+		...(positionalKinds && { positionals: positionalKinds }),
+		...(settings.strict !== undefined && { strict: settings.strict }),
+	});
+	const optionValues = Object.assign(
+		Object.create(null) as Record<string, unknown>,
+		raw.values,
+	);
 
-	async function parse(args: string[]): Promise<Result> {
-		const raw = parseRawArgs({
-			args,
-			flags,
-			...(positionalKinds && { positionals: positionalKinds }),
-			...(settings.strict !== undefined && { strict: settings.strict }),
-		});
-		const optionValues = Object.assign(
-			Object.create(null) as Record<string, unknown>,
-			raw.values,
-		);
-
-		for (const builtin of builtinFlags) {
-			if (!optionValues[builtin.key]) {
-				continue;
-			}
-
-			return builtin.key === "help"
-				? { text: getHelpText(), type: "help" }
-				: { text: version?.version ?? "", type: "version" };
+	for (const builtin of builtinFlags) {
+		if (!optionValues[builtin.key]) {
+			continue;
 		}
 
-		for (const builtin of builtinFlags) {
-			// eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-			delete optionValues[builtin.key];
-		}
-
-		// Positionals that failed to convert would make validation issues confusing.
-		const positionalsConverted = !raw.issues.some(
-			(issue) => issue.kind === "invalid" && !issue.flag,
-		);
-
-		const [validatedOptions, validatedPositionals] = await Promise.all([
-			validateOptions<Values>(options, optionValues),
-			positionals && positionalsConverted
-				? validatePositionals<PositionalValues>(positionals, raw.positionals)
-				: ({ value: raw.positionals } as ValidationResult<PositionalValues>),
-		]);
-		const validationIssues = validatedOptions.issues ?? [];
-		const parsedFlags = new Set(raw.issues.map((issue) => issue.flag));
-
-		// Flags that weren't provided and that the schema rejects as missing are required.
-		const missingFlags = optionFlags
-			.map((flag) => flag.key)
-			.filter(
-				(key) =>
-					!Object.hasOwn(optionValues, key) &&
-					!parsedFlags.has(key) &&
-					validationIssues.some((issue) => issue.flag === key),
-			);
-
-		// Each flag should only be reported once, with its most specific issue.
-		const reportedFlags = new Set([...parsedFlags, ...missingFlags]);
-		const issues = [
-			...raw.issues,
-			...missingFlags.map((key): ArgsIssue => ({
-				flag: key,
-				kind: "missing",
-				message: `--${key} is required.`,
-			})),
-			...validationIssues.filter(
-				(issue) => !issue.flag || !reportedFlags.has(issue.flag),
-			),
-			...(validatedPositionals.issues ?? []),
-		];
-
-		if (issues.length) {
-			return {
-				issues,
-				text: [
-					formatIssues(issues),
-					hasHelpFlag && `Run '${name} --help' for usage.`,
-				]
-					.filter(Boolean)
-					.join("\n"),
-				type: "error",
-				warnings: raw.warnings,
-			};
+		if (builtin.key === "version") {
+			return { text: version?.version ?? "", type: "version" };
 		}
 
 		return {
-			positionals: validatedPositionals.value as PositionalValues,
-			...(raw.terminatorIndex !== undefined && {
-				terminatorIndex: raw.terminatorIndex,
+			text: formatHelp({
+				...(settings.description && { description: settings.description }),
+				...(settings.examples && { examples: settings.examples }),
+				flags,
+				...(settings.footer && { footer: settings.footer }),
+				name,
+				...(positionalsDescription && {
+					positionals: {
+						...(positionalsDescription.description && {
+							description: positionalsDescription.description,
+						}),
+						usage:
+							settings.positionalsUsage ??
+							formatPositionalsUsage(positionalsDescription),
+					},
+				}),
+				...(settings.usage && { usage: settings.usage }),
+				// Descriptions wrap to the terminal's width when printing to one.
+				...(process.stdout.isTTY && { width: process.stdout.columns }),
 			}),
-			type: "values",
-			unknown: raw.unknown,
-			values: validatedOptions.value as Values,
+			type: "help",
+		};
+	}
+
+	for (const builtin of builtinFlags) {
+		// eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+		delete optionValues[builtin.key];
+	}
+
+	// Positionals that failed to convert would make validation issues confusing.
+	const positionalsConverted = !raw.issues.some(
+		(issue) => issue.kind === "invalid" && !issue.flag,
+	);
+
+	const validatedOptions = validateOptions<Values>(options, optionValues);
+	const validatedPositionals =
+		positionals && positionalsConverted
+			? validatePositionals<PositionalValues>(positionals, raw.positionals)
+			: ({ value: raw.positionals } as ValidationResult<PositionalValues>);
+	const validationIssues = validatedOptions.issues ?? [];
+	const parsedFlags = new Set(raw.issues.map((issue) => issue.flag));
+
+	// Flags that weren't provided and that the schema rejects as missing are required.
+	const missingFlags = optionFlags
+		.map((flag) => flag.key)
+		.filter(
+			(key) =>
+				!Object.hasOwn(optionValues, key) &&
+				!parsedFlags.has(key) &&
+				validationIssues.some((issue) => issue.flag === key),
+		);
+
+	// Each flag should only be reported once, with its most specific issue.
+	const reportedFlags = new Set([...parsedFlags, ...missingFlags]);
+	const issues = [
+		...raw.issues,
+		...missingFlags.map((key): ArgsIssue => ({
+			flag: key,
+			kind: "missing",
+			message: `--${key} is required.`,
+		})),
+		...validationIssues.filter(
+			(issue) => !issue.flag || !reportedFlags.has(issue.flag),
+		),
+		...(validatedPositionals.issues ?? []),
+	];
+
+	// Validation issues are always in issues, but checking them narrows the values below.
+	if (issues.length || validatedOptions.issues || validatedPositionals.issues) {
+		return {
+			issues,
+			text: [
+				formatIssues(issues),
+				hasHelpFlag && `Run '${name} --help' for usage.`,
+			]
+				.filter(Boolean)
+				.join("\n"),
+			type: "error",
 			warnings: raw.warnings,
 		};
 	}
 
-	/**
-	 * Parses args, printing help, version, warnings, or errors as needed.
-	 * Errors also set `process.exitCode` (default: 1).
-	 * @param args Raw command-line args, such as `process.argv.slice(2)`.
-	 * @param runSettings Overrides for how text is printed and the error exit code.
-	 * @returns Parsed values and positionals, or undefined if the CLI shouldn't continue.
-	 */
-	async function run(args: string[], runSettings: CliRunSettings = {}) {
-		// Console methods are looked up at print time, so they can be replaced in tests.
-		const {
-			error = (text: string) => {
-				console.error(text);
-			},
-			exitCode = 1,
-			log = (text: string) => {
-				console.log(text);
-			},
-			warn = (text: string) => {
-				console.warn(text);
-			},
-		} = runSettings;
-		const result = await parse(args);
-
-		switch (result.type) {
-			case "error":
-				if (result.warnings.length) {
-					warn(formatIssues(result.warnings));
-				}
-
-				error(result.text);
-				process.exitCode = exitCode;
-				return undefined;
-
-			case "help":
-			case "version":
-				log(result.text);
-				return undefined;
-
-			case "values":
-				if (result.warnings.length) {
-					warn(formatIssues(result.warnings));
-				}
-
-				return result;
-		}
-	}
-
-	return { flags, formatHelp: getHelpText, parse, run };
+	return {
+		positionals: validatedPositionals.value,
+		...(raw.terminatorIndex !== undefined && {
+			terminatorIndex: raw.terminatorIndex,
+		}),
+		type: "values",
+		unknown: raw.unknown,
+		values: validatedOptions.value,
+		warnings: raw.warnings,
+	};
 }
 
 function assertValidShorts(flags: FlagDescriptor[]) {

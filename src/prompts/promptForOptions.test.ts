@@ -41,8 +41,7 @@ function createAsyncSchema(schema: ArgsSchema): ArgsSchema {
 	return {
 		"~standard": {
 			...schema["~standard"],
-			validate: async (value: unknown) =>
-				await schema["~standard"].validate(value),
+			validate: async (value: unknown) => schema["~standard"].validate(value),
 		},
 	};
 }
@@ -679,16 +678,35 @@ describe(promptForOptions, () => {
 		});
 	});
 
-	it("prompts again with the schema's issues when an async schema rejects the prompted value", async () => {
-		mockText.mockResolvedValueOnce("abc").mockResolvedValueOnce("12345");
+	it("throws a TypeError when a schema validates the prompted value asynchronously", async () => {
+		mockText.mockResolvedValueOnce("12345");
+
+		await expect(
+			promptForOptions({
+				flags: [
+					createFlag("code", "string", {
+						required: true,
+						schema: createAsyncSchema(z.string()),
+					}),
+				],
+				values: {},
+			}),
+		).rejects.toThrow(
+			new TypeError(
+				"Schemas must validate synchronously and report issues rather than throw, but one returned a Promise.",
+			),
+		);
+	});
+
+	it("prompts again with the schema's issues when the schema rejects a selected value", async () => {
+		mockSelect.mockResolvedValueOnce("b").mockResolvedValueOnce("a");
 
 		const result = await promptForOptions({
 			flags: [
-				createFlag("code", "string", {
+				createFlag("letter", "string", {
+					choices: ["a", "b"],
 					required: true,
-					schema: createAsyncSchema(
-						z.string().min(5).regex(/^\d+$/, "Must be digits"),
-					),
+					schema: z.literal("a", "Must be a"),
 				}),
 			],
 			values: {},
@@ -696,13 +714,10 @@ describe(promptForOptions, () => {
 
 		expect(result).toEqual({
 			cancelled: false,
-			completed: { code: "12345" },
-			prompted: { code: "12345" },
+			completed: { letter: "a" },
+			prompted: { letter: "a" },
 		});
-		expect(mockLogError).toHaveBeenCalledWith(
-			"--code: Too small: expected string to have >=5 characters; Must be digits",
-		);
-		expect(mockText).toHaveBeenCalledTimes(2);
+		expect(mockLogError).toHaveBeenCalledWith("--letter: Must be a");
 	});
 
 	it("prompts again with the error message when the schema throws for the prompted value", async () => {
@@ -766,36 +781,21 @@ describe(promptForOptions, () => {
 		expect(mockLogError).toHaveBeenCalledWith("--letter: No b");
 	});
 
-	it("prompts for an optional flag when its async schema rejects undefined", async () => {
-		mockText.mockResolvedValueOnce("Josh");
-
-		const result = await promptForOptions({
-			flags: [
-				createFlag("name", "string", {
-					schema: createAsyncSchema(z.string()),
-				}),
-			],
-			values: {},
-		});
-
-		expect(result).toEqual({
-			cancelled: false,
-			completed: { name: "Josh" },
-			prompted: { name: "Josh" },
-		});
-	});
-
-	it("does not prompt for an optional flag when its async schema accepts undefined", async () => {
-		const result = await promptForOptions({
-			flags: [
-				createFlag("name", "string", {
-					schema: createAsyncSchema(z.string().optional()),
-				}),
-			],
-			values: {},
-		});
-
-		expect(result).toEqual({ cancelled: false, completed: {}, prompted: {} });
+	it("throws a TypeError when an optional flag's schema validates asynchronously", async () => {
+		await expect(
+			promptForOptions({
+				flags: [
+					createFlag("name", "string", {
+						schema: createAsyncSchema(z.string().optional()),
+					}),
+				],
+				values: {},
+			}),
+		).rejects.toThrow(
+			new TypeError(
+				"Schemas must validate synchronously and report issues rather than throw, but one returned a Promise.",
+			),
+		);
 		expect(mockText).not.toHaveBeenCalled();
 	});
 
