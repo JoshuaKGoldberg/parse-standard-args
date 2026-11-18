@@ -794,7 +794,7 @@ describe(describeOptions, () => {
 					"~standard": {
 						...later["~standard"],
 						validate: async (value: unknown) =>
-							await later["~standard"].validate(value),
+							later["~standard"].validate(value),
 					},
 				},
 			};

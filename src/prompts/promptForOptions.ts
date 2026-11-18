@@ -2,6 +2,7 @@ import * as prompts from "@clack/prompts";
 
 import type { ArgsSchema, FlagDescriptor } from "../types.ts";
 
+import { assertSyncResult } from "../assertSyncResult.ts";
 import { convertValue } from "../convertValue.ts";
 import { numberPattern } from "../numberPattern.ts";
 
@@ -64,7 +65,7 @@ export async function promptForOptions(
 	for (const flag of flags) {
 		if (
 			(Object.hasOwn(values, flag.key) && values[flag.key] !== undefined) ||
-			!(await shouldPrompt(flag))
+			!shouldPrompt(flag)
 		) {
 			continue;
 		}
@@ -81,14 +82,14 @@ export async function promptForOptions(
 				break;
 			}
 
-			const result = await validateWithSchema(flag.schema, value);
+			const result = validateWithSchema(flag.schema, value);
 
 			if (!result.issues) {
 				prompted[flag.key] = parse ? result.output : value;
 				break;
 			}
 
-			// Synchronous schemas were already checked while typing, so this is usually an async one.
+			// Only text prompts are validated while typing, so this is usually another kind.
 			prompts.log.error(`--${flag.key}: ${result.issues.join("; ")}`);
 		}
 	}
@@ -190,7 +191,6 @@ function createValidator(flag: FlagDescriptor) {
 			return message;
 		}
 
-		// Clack validators are synchronous, so async schemas are only validated afterwards.
 		let result;
 
 		try {
@@ -199,7 +199,13 @@ function createValidator(flag: FlagDescriptor) {
 			return error instanceof Error ? error.message : String(error);
 		}
 
-		return result instanceof Promise ? undefined : result.issues?.[0]?.message;
+		if (result instanceof Promise) {
+			// Promises are reported as a TypeError once the value is submitted.
+			result.catch(() => undefined);
+			return undefined;
+		}
+
+		return result.issues?.[0]?.message;
 	};
 }
 
@@ -251,9 +257,8 @@ function getTextMessage(flag: FlagDescriptor, text: string) {
 
 /**
  * Flags are prompted for if they're visible and have a default to confirm or are required.
- * Async schemas can't be checked while describing options, so they're checked here.
  */
-async function shouldPrompt(flag: FlagDescriptor) {
+function shouldPrompt(flag: FlagDescriptor) {
 	if (flag.hidden) {
 		return false;
 	}
@@ -262,7 +267,7 @@ async function shouldPrompt(flag: FlagDescriptor) {
 		return true;
 	}
 
-	return !!flag.schema && !!(await validateWithSchema(flag.schema)).issues;
+	return !!flag.schema && !!validateWithSchema(flag.schema).issues;
 }
 
 function splitText(text: string) {
@@ -272,17 +277,18 @@ function splitText(text: string) {
 		.filter(Boolean);
 }
 
-async function validateWithSchema(
-	schema: ArgsSchema,
-	value?: unknown,
-): Promise<SchemaResult> {
-	try {
-		const result = await schema["~standard"].validate(value);
+function validateWithSchema(schema: ArgsSchema, value?: unknown): SchemaResult {
+	let result;
 
-		return result.issues
-			? { issues: result.issues.map((issue) => issue.message) }
-			: { output: result.value };
+	try {
+		result = schema["~standard"].validate(value);
 	} catch (error) {
 		return { issues: [error instanceof Error ? error.message : String(error)] };
 	}
+
+	const synced = assertSyncResult(result);
+
+	return synced.issues
+		? { issues: synced.issues.map((issue) => issue.message) }
+		: { output: synced.value };
 }

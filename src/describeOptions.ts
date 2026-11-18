@@ -380,8 +380,13 @@ function isRequiredSchema(schema: ArgsSchema) {
 		return true;
 	}
 
-	// Async schemas can't be checked synchronously, so they're assumed optional.
-	return !(result instanceof Promise) && !!result.issues;
+	if (result instanceof Promise) {
+		// Promises are reported as a TypeError once the flag is validated.
+		result.catch(() => undefined);
+		return false;
+	}
+
+	return !!result.issues;
 }
 
 /**

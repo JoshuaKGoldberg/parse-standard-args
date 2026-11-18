@@ -2,6 +2,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import type { ArgsIssue, ArgsSchema, OptionsDefinition } from "./types.ts";
 
+import { assertSyncResult } from "./assertSyncResult.ts";
 import { isArgsSchema } from "./getJsonSchema.ts";
 
 export type ValidationResult<Value> =
@@ -122,22 +123,14 @@ function validateSchema<Value>(
 		};
 	}
 
-	// Zod also returns a rejected Promise when a sync schema throws.
-	if (result instanceof Promise) {
-		// The rejection shouldn't crash the process on top of the TypeError.
-		result.catch(() => undefined);
+	const synced = assertSyncResult(result);
 
-		throw new TypeError(
-			"Schemas must validate synchronously and report issues rather than throw, but one returned a Promise.",
-		);
-	}
-
-	if (!result.issues) {
-		return { value: result.value as Value };
+	if (!synced.issues) {
+		return { value: synced.value as Value };
 	}
 
 	return {
-		issues: result.issues.map((issue) => {
+		issues: synced.issues.map((issue) => {
 			const target = getTarget(normalizePath(issue.path));
 
 			return {

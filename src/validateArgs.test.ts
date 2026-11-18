@@ -14,8 +14,7 @@ function createAsyncSchema<Schema extends ArgsSchema>(schema: Schema) {
 	return {
 		"~standard": {
 			...schema["~standard"],
-			validate: async (value: unknown) =>
-				await schema["~standard"].validate(value),
+			validate: async (value: unknown) => schema["~standard"].validate(value),
 		},
 	} as Schema;
 }
